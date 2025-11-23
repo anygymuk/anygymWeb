@@ -91,7 +91,7 @@ export default function SubscriptionManager({ subscription }: SubscriptionManage
       </p>
       <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
         <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-          What's included:
+          What&apos;s included:
         </h3>
         <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
           <li>Unlimited gym pass generation</li>
