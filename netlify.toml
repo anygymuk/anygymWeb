@@ -1,11 +1,15 @@
 [build]
   command = "npm run build"
-  publish = ".next"
-  functions = "netlify/functions"
+  # Do NOT set publish directory - the Next.js plugin handles this automatically
+  # Setting publish = ".next" causes: "Your publish directory cannot be the same as the base directory"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
 [build.environment]
   NODE_VERSION = "20"
+
+# Exclude .env.local and other local files from build
+[build.ignore]
+  ignore = ".env*.local"
 
