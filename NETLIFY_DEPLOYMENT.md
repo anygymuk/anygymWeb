@@ -11,8 +11,14 @@
 In your Netlify dashboard, configure these build settings:
 
 - **Build command**: `npm run build`
-- **Publish directory**: Leave empty (the Netlify Next.js plugin handles this)
+- **Publish directory**: **MUST BE LEFT EMPTY** (do not set to `.` or `.next` - the Netlify Next.js plugin handles this automatically)
+- **Base directory**: Leave empty (unless your Next.js app is in a subdirectory)
 - **Node version**: `20` (or set in `netlify.toml`)
+
+**Important**: If you see the error "Your publish directory cannot be the same as the base directory", make sure:
+1. Publish directory is **completely empty** in Netlify dashboard
+2. Base directory is **empty** (unless your app is in a subdirectory)
+3. The `@netlify/plugin-nextjs` plugin is installed (it's in `package.json`)
 
 ## Required Environment Variables
 

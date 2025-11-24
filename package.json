@@ -16,6 +16,7 @@
   "dependencies": {
     "@auth0/nextjs-auth0": "^3.0.0",
     "@neondatabase/serverless": "^0.7.0",
+    "@sendgrid/mail": "^8.1.6",
     "@stripe/react-stripe-js": "^2.4.0",
     "@stripe/stripe-js": "^2.4.0",
     "leaflet": "^1.9.4",

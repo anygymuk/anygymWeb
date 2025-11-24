@@ -36,6 +36,17 @@ export async function POST(request: NextRequest) {
 
     if (userResult.length > 0 && userResult[0].stripe_customer_id) {
       customerId = userResult[0].stripe_customer_id
+      // Update customer metadata to ensure auth0_id is set
+      try {
+        await stripe.customers.update(customerId, {
+          metadata: {
+            userId: userId,
+            auth0_id: userId,
+          },
+        })
+      } catch (updateError) {
+        console.warn('Failed to update customer metadata:', updateError)
+      }
     } else {
       // Check subscriptions table as fallback
       const subscriptionResult = await sql`
@@ -52,6 +63,7 @@ export async function POST(request: NextRequest) {
           email: userEmail || undefined,
           metadata: {
             userId: userId,
+            auth0_id: userId, // Also include as auth0_id for webhook compatibility
           },
         })
         customerId = customer.id
@@ -68,6 +80,27 @@ export async function POST(request: NextRequest) {
     console.log('[create-checkout-session] Creating checkout session for price:', priceId)
     console.log('[create-checkout-session] Customer ID:', customerId)
     
+    // Get product and price details to extract metadata
+    const price = await stripe.prices.retrieve(priceId)
+    const product = await stripe.products.retrieve(price.product as string)
+    
+    // Determine tier from product metadata or name
+    let tier = 'standard'
+    if (product.metadata?.tierGyms) {
+      tier = product.metadata.tierGyms
+    } else {
+      const name = product.name.toLowerCase()
+      if (name.includes('premium')) {
+        tier = 'premium'
+      } else if (name.includes('elite')) {
+        tier = 'elite'
+      }
+    }
+    
+    // Get monthly limit and guest passes from product metadata
+    const monthlyLimit = parseInt(product.metadata?.['Gym Passes'] || '8', 10)
+    const guestPassesLimit = parseInt(product.metadata?.['Guest Passes'] || '0', 10)
+    
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
@@ -83,6 +116,9 @@ export async function POST(request: NextRequest) {
       metadata: {
         userId: userId,
         priceId: priceId,
+        tier: tier,
+        monthly_limit: monthlyLimit.toString(),
+        guest_passes_limit: guestPassesLimit.toString(),
       },
       allow_promotion_codes: true,
     })
