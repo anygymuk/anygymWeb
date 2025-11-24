@@ -29,17 +29,20 @@ interface PassesViewProps {
   subscription: Subscription | null
   activePasses: GymPass[]
   passHistory: PassHistoryItem[]
+  passesInBillingPeriod: number
 }
 
 export default function PassesView({
   subscription,
   activePasses,
   passHistory,
+  passesInBillingPeriod,
 }: PassesViewProps) {
-  const visitsUsed = subscription?.visitsUsed || 0
+  // Use actual passes created in billing period instead of visitsUsed
+  const passesCreated = passesInBillingPeriod
   const monthlyLimit = subscription?.monthlyLimit || 0
-  const visitsRemaining = monthlyLimit - visitsUsed
-  const visitsPercentage = monthlyLimit > 0 ? (visitsUsed / monthlyLimit) * 100 : 0
+  const visitsRemaining = monthlyLimit - passesCreated
+  const visitsPercentage = monthlyLimit > 0 ? (passesCreated / monthlyLimit) * 100 : 0
 
   const guestPassesUsed = subscription?.guestPassesUsed || 0
   const guestPassesLimit = subscription?.guestPassesLimit || 0
@@ -63,7 +66,7 @@ export default function PassesView({
                   {subscription?.tier || 'Premium'} Plan
                 </span>
                 <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {visitsUsed}/{monthlyLimit}
+                  {passesCreated}/{monthlyLimit}
                 </span>
               </div>
             </div>
@@ -74,10 +77,10 @@ export default function PassesView({
               />
             </div>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              {visitsRemaining} visits remaining
+              {visitsRemaining} passes remaining this billing period
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-              Resets monthly.
+              Resets on {subscription?.nextBillingDate ? new Date(subscription.nextBillingDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'next billing date'}.
             </p>
           </div>
 

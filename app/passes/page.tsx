@@ -83,6 +83,26 @@ async function getActivePasses(userId: string): Promise<GymPass[]> {
   }
 }
 
+async function getPassesInBillingPeriod(
+  userId: string,
+  startDate: Date,
+  nextBillingDate: Date
+): Promise<number> {
+  try {
+    const result = await sql`
+      SELECT COUNT(*) as count
+      FROM gym_passes
+      WHERE user_id = ${userId}
+        AND created_at >= ${startDate.toISOString()}
+        AND created_at < ${nextBillingDate.toISOString()}
+    `
+    return result[0]?.count || 0
+  } catch (error) {
+    console.error('Error counting passes in billing period:', error)
+    return 0
+  }
+}
+
 async function getPassHistory(userId: string) {
   try {
     const result = await sql`
@@ -155,6 +175,16 @@ export default async function PassesPage() {
   const subscription = await getUserSubscription(userId)
   const activePasses = await getActivePasses(userId)
   const passHistory = await getPassHistory(userId)
+  
+  // Get count of passes created in current billing period
+  let passesInBillingPeriod = 0
+  if (subscription) {
+    passesInBillingPeriod = await getPassesInBillingPeriod(
+      userId,
+      subscription.startDate,
+      subscription.nextBillingDate
+    )
+  }
 
   // Get user initials for avatar
   const userName = session.user.name || session.user.email || 'User'
@@ -185,6 +215,7 @@ export default async function PassesPage() {
             subscription={subscription}
             activePasses={activePasses}
             passHistory={passHistory}
+            passesInBillingPeriod={passesInBillingPeriod}
           />
         </div>
       </div>
