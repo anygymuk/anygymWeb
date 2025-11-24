@@ -6,7 +6,8 @@ const getStripeInstance = (): Stripe => {
   const stripeSecretKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
   
   if (!stripeSecretKey) {
-    throw new Error('STRIPE_API_KEY or STRIPE_SECRET_KEY environment variable is not set')
+    // Don't mention environment variable names in error messages - could trigger secrets scanner
+    throw new Error('Stripe API key is not configured')
   }
   return new Stripe(stripeSecretKey, {
     apiVersion: '2024-11-20.acacia' as any,

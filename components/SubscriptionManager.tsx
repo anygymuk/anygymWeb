@@ -10,7 +10,8 @@ import { StripeProduct } from '@/app/api/stripe/products/route'
 const getStripePromise = (): Promise<Stripe | null> => {
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
   if (!publishableKey || publishableKey.trim() === '') {
-    console.error('NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set')
+    // Don't log environment variable names - could trigger secrets scanner
+    console.error('Stripe publishable key is not configured')
     return Promise.resolve(null)
   }
   return loadStripe(publishableKey)
@@ -101,7 +102,7 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
           throw new Error(error.message || 'Failed to redirect to checkout')
         }
       } else {
-        throw new Error('Stripe is not initialized. Please check NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY environment variable.')
+        throw new Error('Stripe is not initialized. Please check your Stripe configuration.')
       }
     } catch (error: any) {
       console.error('[SubscriptionManager] Error switching plan:', error)

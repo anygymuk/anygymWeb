@@ -5,6 +5,9 @@ import { sql } from '@/lib/db'
 import { GymPass } from '@/lib/types'
 import Logo from '@/components/Logo'
 
+// Mark page as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+
 async function getPass(id: string, userId: string): Promise<GymPass | null> {
   try {
     const result = await sql`

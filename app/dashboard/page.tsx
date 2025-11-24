@@ -5,6 +5,9 @@ import { Subscription, Gym } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import GymMapView from '@/components/GymMapView'
 
+// Mark page as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+
 async function getUserSubscription(userId: string): Promise<Subscription | null> {
   try {
     const result = await sql`

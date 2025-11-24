@@ -6,6 +6,9 @@ import { Gym } from '@/lib/types'
 import GymSearch from '@/components/GymSearch'
 import Logo from '@/components/Logo'
 
+// Mark page as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+
 async function getGyms(searchQuery?: string): Promise<Gym[]> {
   try {
     if (searchQuery) {

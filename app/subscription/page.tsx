@@ -6,6 +6,9 @@ import SubscriptionManager from '@/components/SubscriptionManager'
 import DashboardLayout from '@/components/DashboardLayout'
 import { StripeProduct } from '@/app/api/stripe/products/route'
 
+// Mark page as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+
 async function getUserSubscription(userId: string): Promise<Subscription | null> {
   try {
     const result = await sql`
@@ -49,12 +52,13 @@ async function getStripeProducts(): Promise<StripeProduct[]> {
     // Check if Stripe is properly configured
     const stripeKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
     if (!stripeKey) {
-      console.error('[getStripeProducts] STRIPE_API_KEY or STRIPE_SECRET_KEY is not set')
+      // Don't log environment variable names - could trigger secrets scanner
+      console.error('[getStripeProducts] Stripe API key is not configured')
       return []
     }
     
     console.log('[getStripeProducts] Fetching products from Stripe...')
-    console.log('[getStripeProducts] Using Stripe key:', stripeKey.substring(0, 7) + '...' + stripeKey.substring(stripeKey.length - 4))
+    // Don't log Stripe key even partially - could trigger secrets scanner
     
     const products = await stripe.products.list({
       active: true,

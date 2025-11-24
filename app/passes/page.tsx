@@ -6,6 +6,9 @@ import DashboardLayout from '@/components/DashboardLayout'
 import PassesView from '@/components/PassesView'
 import AccountSetupError from '@/components/AccountSetupError'
 
+// Mark page as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+
 /**
  * Get the app user ID from the Auth0 ID by looking up the app_users table
  * Creates the user if they don't exist

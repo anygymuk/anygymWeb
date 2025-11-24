@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { sql } from '@/lib/db'
 
+// Mark route as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession()

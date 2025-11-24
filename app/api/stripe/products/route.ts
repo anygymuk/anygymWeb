@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { stripe } from '@/lib/stripe'
 
+// Mark route as dynamic - uses cookies for authentication
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 export interface StripeProduct {
   tier: string
   name: string
