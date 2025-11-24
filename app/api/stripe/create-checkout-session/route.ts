@@ -13,7 +13,11 @@ export async function POST(request: NextRequest) {
     const userId = session.user.sub
     const userEmail = session.user.email
 
-    if (!process.env.STRIPE_PRICE_ID) {
+    // Get priceId from request body, or fall back to env variable
+    const body = await request.json().catch(() => ({}))
+    const priceId = body.priceId || process.env.STRIPE_PRICE_ID
+
+    if (!priceId) {
       return NextResponse.json(
         { error: 'Stripe price ID not configured' },
         { status: 500 }
@@ -61,13 +65,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    console.log('[create-checkout-session] Creating checkout session for price:', priceId)
+    console.log('[create-checkout-session] Customer ID:', customerId)
+    
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       payment_method_types: ['card'],
       line_items: [
         {
-          price: process.env.STRIPE_PRICE_ID,
+          price: priceId,
           quantity: 1,
         },
       ],
@@ -75,9 +82,12 @@ export async function POST(request: NextRequest) {
       cancel_url: `${request.nextUrl.origin}/subscription?canceled=true`,
       metadata: {
         userId: userId,
+        priceId: priceId,
       },
+      allow_promotion_codes: true,
     })
 
+    console.log('[create-checkout-session] Checkout session created:', checkoutSession.id)
     return NextResponse.json({ sessionId: checkoutSession.id })
   } catch (error) {
     console.error('Error creating checkout session:', error)

@@ -88,46 +88,80 @@ async function getGymChains() {
 }
 
 export default async function Dashboard() {
-  const session = await getSession()
+  try {
+    const session = await getSession()
 
-  if (!session?.user) {
-    redirect('/api/auth/login')
-  }
+    if (!session?.user) {
+      redirect('/api/auth/login')
+    }
 
-  const userId = session.user.sub
-  const subscription = await getUserSubscription(userId)
-  const gyms = await getAllGyms()
-  const chains = await getGymChains()
+    const userId = session.user.sub
+    
+    // Fetch data in parallel with error handling
+    const [subscription, gyms, chains] = await Promise.allSettled([
+      getUserSubscription(userId),
+      getAllGyms(),
+      getGymChains(),
+    ])
 
-  // Get user initials for avatar
-  const userName = session.user.name || session.user.email || 'User'
-  const initials = userName
-    .split(' ')
-    .map((n: string) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
+    const subscriptionResult = subscription.status === 'fulfilled' ? subscription.value : null
+    const gymsResult = gyms.status === 'fulfilled' ? gyms.value : []
+    const chainsResult = chains.status === 'fulfilled' ? chains.value : []
 
-  return (
-    <DashboardLayout
-      userName={userName}
-      userInitials={initials}
-      subscription={subscription}
-    >
-      <div className="flex-1 flex flex-col h-screen">
-        <div className="px-6 py-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Find Your Gym
-          </h1>
+    if (subscription.status === 'rejected') {
+      console.error('Error fetching subscription:', subscription.reason)
+    }
+    if (gyms.status === 'rejected') {
+      console.error('Error fetching gyms:', gyms.reason)
+    }
+    if (chains.status === 'rejected') {
+      console.error('Error fetching chains:', chains.reason)
+    }
+
+    // Get user initials for avatar
+    const userName = session.user.name || session.user.email || 'User'
+    const initials = userName
+      .split(' ')
+      .map((n: string) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2)
+
+    return (
+      <DashboardLayout
+        userName={userName}
+        userInitials={initials}
+        subscription={subscriptionResult}
+      >
+        <div className="flex-1 flex flex-col h-screen">
+          <div className="px-6 py-4">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              Find Your Gym
+            </h1>
+          </div>
+          <div className="flex-1">
+            <GymMapView 
+              initialGyms={gymsResult} 
+              chains={chainsResult}
+              hasSubscription={!!subscriptionResult}
+            />
+          </div>
         </div>
-        <div className="flex-1">
-          <GymMapView 
-            initialGyms={gyms} 
-            chains={chains}
-            hasSubscription={!!subscription}
-          />
+      </DashboardLayout>
+    )
+  } catch (error) {
+    console.error('Error loading dashboard:', error)
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            Error Loading Dashboard
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Please try refreshing the page.
+          </p>
         </div>
       </div>
-    </DashboardLayout>
-  )
+    )
+  }
 }

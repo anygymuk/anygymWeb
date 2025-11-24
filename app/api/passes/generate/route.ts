@@ -9,7 +9,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = session.user.sub
+    const auth0Id = session.user.sub
+    const userEmail = session.user.email
+    const userName = session.user.name
     const { gymId } = await request.json()
 
     if (!gymId) {
@@ -19,10 +21,71 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Get or create the app user ID from app_users table
+    let userResult = await sql`
+      SELECT id FROM app_users 
+      WHERE auth0_id = ${auth0Id}
+      LIMIT 1
+    `
+
+    let appUserId: number
+
+    if (userResult.length === 0) {
+      // User doesn't exist, create them
+      try {
+        const insertResult = await sql`
+          INSERT INTO app_users (auth0_id, email, name, created_at, updated_at)
+          VALUES (${auth0Id}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
+          RETURNING id
+        `
+        if (insertResult.length > 0) {
+          appUserId = insertResult[0].id
+        } else {
+          // If insert failed but user might have been created concurrently, try fetching again
+          userResult = await sql`
+            SELECT id FROM app_users 
+            WHERE auth0_id = ${auth0Id}
+            LIMIT 1
+          `
+          if (userResult.length === 0) {
+            return NextResponse.json(
+              { error: 'Failed to create user account' },
+              { status: 500 }
+            )
+          }
+          appUserId = userResult[0].id
+        }
+      } catch (insertError: any) {
+        // If unique constraint violation, user was created concurrently
+        if (insertError?.code === '23505' || insertError?.message?.includes('unique')) {
+          userResult = await sql`
+            SELECT id FROM app_users 
+            WHERE auth0_id = ${auth0Id}
+            LIMIT 1
+          `
+          if (userResult.length === 0) {
+            return NextResponse.json(
+              { error: 'User account error' },
+              { status: 500 }
+            )
+          }
+          appUserId = userResult[0].id
+        } else {
+          console.error('Error creating user:', insertError)
+          return NextResponse.json(
+            { error: 'Failed to create user account' },
+            { status: 500 }
+          )
+        }
+      }
+    } else {
+      appUserId = userResult[0].id
+    }
+
     // Check if user has active subscription
     const subscriptionResult = await sql`
       SELECT * FROM subscriptions 
-      WHERE user_id = ${userId} 
+      WHERE user_id = ${appUserId} 
       AND status = 'active'
       LIMIT 1
     `
@@ -85,7 +148,7 @@ export async function POST(request: NextRequest) {
         pass_cost
       )
       VALUES (
-        ${userId}, 
+        ${appUserId}, 
         ${parseInt(gymId)}, 
         ${passCode}, 
         'active', 

@@ -1,11 +1,14 @@
 import Stripe from 'stripe'
 
-// Only initialize if STRIPE_SECRET_KEY is available (avoids build-time errors)
+// Only initialize if STRIPE_API_KEY or STRIPE_SECRET_KEY is available (avoids build-time errors)
 const getStripeInstance = (): Stripe => {
-  if (!process.env.STRIPE_SECRET_KEY) {
-    throw new Error('STRIPE_SECRET_KEY environment variable is not set')
+  // Support both STRIPE_API_KEY and STRIPE_SECRET_KEY for compatibility
+  const stripeSecretKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
+  
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_API_KEY or STRIPE_SECRET_KEY environment variable is not set')
   }
-  return new Stripe(process.env.STRIPE_SECRET_KEY, {
+  return new Stripe(stripeSecretKey, {
     apiVersion: '2024-11-20.acacia' as any,
     typescript: true,
   })
