@@ -9,7 +9,3 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# Exclude .env.local and other local files from build
-[build.ignore]
-  ignore = ".env*.local"
-

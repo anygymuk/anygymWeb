@@ -20,7 +20,27 @@ In your Netlify dashboard, configure these build settings:
 2. Base directory is **empty** (unless your app is in a subdirectory)
 3. The `@netlify/plugin-nextjs` plugin is installed (it's in `package.json`)
 
-## Required Environment Variables
+## Environment Variables Setup
+
+### Local Development
+
+1. Copy `.env.example` to `.env.local`:
+   ```bash
+   cp .env.example .env.local
+   ```
+
+2. Fill in your local development credentials in `.env.local`
+
+**Important**: 
+- `.env.local` is already in `.gitignore` and will **NOT** be committed to git
+- `.env.local` is also in `.netlifyignore` and will **NOT** be included in Netlify builds
+- `.env.local` is **only** for local development
+
+### Production (Netlify)
+
+**All environment variables must be set in Netlify Dashboard** - do not commit `.env.local` or any `.env` files to git.
+
+Netlify does **NOT** read `.env` files during builds. You must set all environment variables in the Netlify Dashboard.
 
 Set these in Netlify Dashboard → Site settings → Environment variables:
 
@@ -32,13 +52,20 @@ Set these in Netlify Dashboard → Site settings → Environment variables:
 - `AUTH0_CLIENT_SECRET` - Auth0 application client secret
 
 ### Stripe Variables
-- `STRIPE_SECRET_KEY` - Stripe secret key (starts with `sk_`)
+- `STRIPE_API_KEY` or `STRIPE_SECRET_KEY` - Stripe secret key (starts with `sk_`)
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` - Stripe publishable key (starts with `pk_`)
-- `STRIPE_PRICE_ID` - Stripe subscription price ID (starts with `price_`)
 - `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret (starts with `whsec_`)
 
 ### Database Variables
 - `DATABASE_URL` - Neon database connection string
+
+### Optional Variables (for email and geocoding)
+- `SENDGRID_API_KEY` - SendGrid API key for sending emails (starts with `SG.`)
+- `SENDGRID_FROM_EMAIL` - Email address to send from
+- `SENDGRID_TEMPLATE_ID` - SendGrid template ID for welcome emails
+- `GEOAPIFY_API_KEY` - Geoapify API key for geocoding postcodes
+
+**Note**: Environment variables set in Netlify Dashboard are automatically available during the build and runtime. The `.env.local` file is **only** used for local development and is **never** deployed to Netlify.
 
 ## Auth0 Configuration
 

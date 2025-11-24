@@ -37,13 +37,15 @@ A modern web application for users to sign up via Auth0, subscribe via Stripe, a
 npm install
 ```
 
-2. Set up environment variables:
+2. Set up environment variables for local development:
 
 Copy `.env.example` to `.env.local` and fill in your credentials:
 
 ```bash
 cp .env.example .env.local
 ```
+
+**Important**: `.env.local` is in `.gitignore` and will **NOT** be committed to git. It's only for local development. For production deployments (e.g., Netlify), set environment variables in your hosting platform's dashboard.
 
 Required environment variables:
 - `AUTH0_SECRET`: Generate with `openssl rand -hex 32`

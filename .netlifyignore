@@ -1,0 +1,12 @@
+# Exclude local environment files from Netlify build
+# These files are only for local development
+.env*.local
+.env
+.env.local.backup
+
+# Exclude development files
+node_modules/
+.next/
+.DS_Store
+*.log
+
