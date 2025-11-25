@@ -18,6 +18,25 @@ export interface AppUser {
   updated_at: Date
 }
 
+// Interface for SQL query result rows (all fields optional since different queries return different columns)
+interface UserRow {
+  id?: number
+  auth0_id?: string
+  email?: string | null
+  full_name?: string | null
+  date_of_birth?: string | null
+  address?: string | null
+  address_line1?: string | null
+  address_line2?: string | null
+  address_city?: string | null
+  address_postcode?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_number?: string | null
+  onboarding_completed?: boolean | null
+  created_at?: Date | string
+  updated_at?: Date | string
+}
+
 /**
  * Get or create app user from Auth0 ID
  * Returns the user and whether they need onboarding
@@ -75,7 +94,7 @@ export async function getOrCreateAppUser(
 
   // Try to find existing user
   // Use COALESCE to handle cases where columns might not exist yet
-  let result
+  let result: UserRow[] = []
   try {
     result = await sql`
       SELECT 
@@ -204,7 +223,7 @@ export async function getOrCreateAppUser(
   console.log('[getOrCreateAppUser] User not found, creating new user for auth0_id:', normalizedAuth0Id)
   try {
     // Try to insert with onboarding_completed column, fallback if it doesn't exist
-    let insertResult
+    let insertResult: UserRow[] = []
     try {
       insertResult = await sql`
         INSERT INTO app_users (
