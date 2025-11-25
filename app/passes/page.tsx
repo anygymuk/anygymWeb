@@ -291,8 +291,9 @@ async function updateExpiredPasses(appUserId: number | null, auth0Id?: string): 
         WHERE (user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''})
           AND status = 'active'
           AND valid_until < ${now.toISOString()}
+        RETURNING id
       `
-      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.count || 0)
+      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.length || 0)
     } else {
       const updateResult = await sql`
         UPDATE gym_passes
@@ -300,8 +301,9 @@ async function updateExpiredPasses(appUserId: number | null, auth0Id?: string): 
         WHERE user_id = ${auth0Id || ''}
           AND status = 'active'
           AND valid_until < ${now.toISOString()}
+        RETURNING id
       `
-      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.count || 0)
+      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.length || 0)
     }
   } catch (error) {
     console.error('[updateExpiredPasses] Error updating expired passes:', error)
