@@ -96,21 +96,63 @@ async function handleOtherEvents(event: Stripe.Event) {
   switch (event.type) {
     case 'customer.subscription.updated': {
       const subscription = event.data.object as Stripe.Subscription
+      console.log('🔄 Processing subscription.updated event')
+      console.log('📋 Subscription ID:', subscription.id)
+      console.log('📋 Subscription status:', subscription.status)
+      console.log('📋 current_period_end:', subscription.current_period_end)
+
+      // Validate current_period_end before creating date
+      if (!subscription.current_period_end || typeof subscription.current_period_end !== 'number') {
+        console.error('❌ Invalid current_period_end:', subscription.current_period_end)
+        // Update status only if we can't get the date
+        await sql`
+          UPDATE subscriptions
+          SET 
+            status = ${subscription.status},
+            updated_at = NOW()
+          WHERE stripe_subscription_id = ${subscription.id}
+        `
+        console.log('✅ Updated subscription status (without date)')
+        break
+      }
+
       const nextBillingDate = new Date(subscription.current_period_end * 1000)
+      
+      // Validate the date is valid
+      if (isNaN(nextBillingDate.getTime())) {
+        console.error('❌ Invalid date created from current_period_end:', subscription.current_period_end)
+        // Update status only if date is invalid
+        await sql`
+          UPDATE subscriptions
+          SET 
+            status = ${subscription.status},
+            updated_at = NOW()
+          WHERE stripe_subscription_id = ${subscription.id}
+        `
+        console.log('✅ Updated subscription status (date was invalid)')
+        break
+      }
+
+      const dateString = nextBillingDate.toISOString().split('T')[0]
+      console.log('📅 Next billing date:', dateString)
 
       await sql`
         UPDATE subscriptions
         SET 
           status = ${subscription.status},
-          next_billing_date = ${nextBillingDate.toISOString().split('T')[0]},
+          next_billing_date = ${dateString},
           updated_at = NOW()
         WHERE stripe_subscription_id = ${subscription.id}
       `
+      console.log('✅ Updated subscription in database')
       break
     }
 
     case 'customer.subscription.deleted': {
       const subscription = event.data.object as Stripe.Subscription
+      console.log('🗑️ Processing subscription.deleted event')
+      console.log('📋 Subscription ID:', subscription.id)
+
       await sql`
         UPDATE subscriptions
         SET 
@@ -118,8 +160,12 @@ async function handleOtherEvents(event: Stripe.Event) {
           updated_at = NOW()
         WHERE stripe_subscription_id = ${subscription.id}
       `
+      console.log('✅ Marked subscription as canceled')
       break
     }
+
+    default:
+      console.log('ℹ️ Unhandled event type:', event.type)
   }
 }
 
@@ -257,19 +303,50 @@ async function processCheckoutSession(
       throw insertError
     }
 
-    // Get user's postcode from Stripe customer metadata
+    // Get user's postcode - try Stripe metadata first, then fall back to database
     let postcode = customerObj.metadata?.postcode || null
-    let userCoords: { latitude: number; longitude: number } | null = null
-
     console.log('📍 Postcode from Stripe metadata:', postcode)
+
+    // If no postcode in Stripe metadata, try to get it from app_users table
+    if (!postcode) {
+      console.log('🔍 Postcode not in Stripe metadata, checking app_users table...')
+      try {
+        const userResult = await sql`
+          SELECT address_postcode 
+          FROM app_users 
+          WHERE auth0_id = ${auth0Id}
+          LIMIT 1
+        `
+        if (userResult.length > 0 && userResult[0].address_postcode) {
+          postcode = userResult[0].address_postcode
+          console.log('✅ Found postcode in database:', postcode)
+        } else {
+          console.log('⚠️ No postcode found in database either')
+        }
+      } catch (dbError: any) {
+        console.error('❌ Error fetching postcode from database:', dbError?.message)
+        // Continue without postcode - will use first 3 gyms
+      }
+    }
+
+    let userCoords: { latitude: number; longitude: number } | null = null
 
     // If we have a postcode, geocode it
     if (postcode) {
       console.log('🗺️ Geocoding postcode:', postcode)
-      userCoords = await getCoordinatesFromPostcode(postcode)
-      console.log('📍 User coordinates:', userCoords)
+      try {
+        userCoords = await getCoordinatesFromPostcode(postcode)
+        if (userCoords) {
+          console.log('✅ User coordinates:', userCoords)
+        } else {
+          console.log('⚠️ Geocoding returned no coordinates')
+        }
+      } catch (geocodeError: any) {
+        console.error('❌ Error geocoding postcode:', geocodeError?.message)
+        // Continue without coordinates - will use first 3 gyms
+      }
     } else {
-      console.log('⚠️ No postcode in Stripe metadata - cannot calculate distances')
+      console.log('⚠️ No postcode available - cannot calculate distances')
     }
 
     // Fetch gyms
