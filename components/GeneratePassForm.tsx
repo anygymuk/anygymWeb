@@ -75,7 +75,8 @@ export default function GeneratePassForm({ gymId, chain }: GeneratePassFormProps
         throw new Error(data.error || 'Failed to generate pass')
       }
 
-      router.push(`/passes/${data.pass.id}`)
+      // Redirect to passes page to see the newly generated pass
+      router.push('/passes')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setLoading(false)

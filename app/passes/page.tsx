@@ -593,6 +593,7 @@ async function getPassHistory(appUserId: number | null, auth0Id?: string) {
     console.log('[getPassHistory] appUserId type:', typeof appUserId)
     console.log('[getPassHistory] auth0Id:', auth0Id)
     
+    const now = new Date()
     let result
     if (appUserId && appUserId > 0) {
       result = await sql`
@@ -608,6 +609,7 @@ async function getPassHistory(appUserId: number | null, auth0Id?: string) {
         JOIN gyms g ON gp.gym_id = g.id
         LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
         WHERE (gp.user_id::text = ${appUserId}::text OR gp.user_id = ${auth0Id || ''})
+          AND (gp.valid_until < ${now.toISOString()} OR gp.status = 'expired' OR gp.status = 'used')
         ORDER BY gp.created_at DESC
         LIMIT 100
       `
@@ -625,6 +627,7 @@ async function getPassHistory(appUserId: number | null, auth0Id?: string) {
         JOIN gyms g ON gp.gym_id = g.id
         LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
         WHERE gp.user_id = ${auth0Id || ''}
+          AND (gp.valid_until < ${now.toISOString()} OR gp.status = 'expired' OR gp.status = 'used')
         ORDER BY gp.created_at DESC
         LIMIT 100
       `

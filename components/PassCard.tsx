@@ -1,7 +1,6 @@
 'use client'
 
 import { GymPass } from '@/lib/types'
-import Link from 'next/link'
 
 interface PassCardProps {
   pass: GymPass
@@ -34,12 +33,9 @@ export default function PassCard({ pass }: PassCardProps) {
           Valid until: {new Date(pass.validUntil).toLocaleDateString()}
         </span>
       </div>
-      <Link
-        href={`/passes/${pass.id}`}
-        className="block w-full text-center px-4 py-2 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors font-medium"
-      >
-        View Pass
-      </Link>
+      <div className="text-sm text-gray-600 dark:text-gray-400">
+        Pass Code: <span className="font-mono font-semibold">{pass.passCode}</span>
+      </div>
     </div>
   )
 }

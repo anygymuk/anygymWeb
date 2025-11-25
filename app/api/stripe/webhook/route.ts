@@ -100,51 +100,108 @@ async function handleOtherEvents(event: Stripe.Event) {
       console.log('📋 Subscription ID:', subscription.id)
       console.log('📋 Subscription status:', subscription.status)
       console.log('📋 current_period_end:', subscription.current_period_end)
+      console.log('📋 Subscription items count:', subscription.items.data.length)
+
+      // Get subscription details from the first item (price/product)
+      let tier = 'standard'
+      let monthlyLimit = 8
+      let guestPassesLimit = 0
+      let price = 0
+
+      if (subscription.items.data.length > 0) {
+        const subscriptionItem = subscription.items.data[0]
+        const priceId = subscriptionItem.price.id
+        
+        try {
+          // Retrieve price and product to get metadata
+          const priceObj = await stripe.prices.retrieve(priceId)
+          const product = await stripe.products.retrieve(priceObj.product as string)
+          
+          // Determine tier from product metadata or name
+          if (product.metadata?.tierGyms) {
+            tier = product.metadata.tierGyms
+          } else {
+            const name = product.name.toLowerCase()
+            if (name.includes('premium')) {
+              tier = 'premium'
+            } else if (name.includes('elite')) {
+              tier = 'elite'
+            }
+          }
+          
+          // Get limits from product metadata
+          monthlyLimit = parseInt(product.metadata?.['Gym Passes'] || '8', 10)
+          guestPassesLimit = parseInt(product.metadata?.['Guest Passes'] || '0', 10)
+          
+          // Get price amount
+          if (priceObj.unit_amount) {
+            price = priceObj.unit_amount / 100
+          }
+          
+          console.log('📋 Updated tier:', tier)
+          console.log('📋 Updated monthly_limit:', monthlyLimit)
+          console.log('📋 Updated guest_passes_limit:', guestPassesLimit)
+          console.log('📋 Updated price:', price)
+        } catch (productError: any) {
+          console.warn('⚠️ Could not retrieve product details:', productError.message)
+          // Continue with existing values from database
+        }
+      }
 
       // Validate current_period_end before creating date
-      if (!subscription.current_period_end || typeof subscription.current_period_end !== 'number') {
-        console.error('❌ Invalid current_period_end:', subscription.current_period_end)
-        // Update status only if we can't get the date
+      let dateString: string | null = null
+      if (subscription.current_period_end && typeof subscription.current_period_end === 'number') {
+        const nextBillingDate = new Date(subscription.current_period_end * 1000)
+        
+        // Validate the date is valid
+        if (!isNaN(nextBillingDate.getTime())) {
+          dateString = nextBillingDate.toISOString().split('T')[0]
+          console.log('📅 Next billing date:', dateString)
+        } else {
+          console.error('❌ Invalid date created from current_period_end:', subscription.current_period_end)
+        }
+      } else {
+        console.warn('⚠️ No valid current_period_end in subscription')
+      }
+
+      // Handle cancellation - if status is canceled, mark as canceled in DB
+      const dbStatus = subscription.status === 'canceled' || subscription.status === 'cancelled' 
+        ? 'canceled' 
+        : subscription.status
+
+      // Update subscription with all available information
+      if (dateString) {
         await sql`
           UPDATE subscriptions
           SET 
-            status = ${subscription.status},
+            status = ${dbStatus},
+            tier = ${tier},
+            monthly_limit = ${monthlyLimit},
+            guest_passes_limit = ${guestPassesLimit},
+            price = ${price},
+            next_billing_date = ${dateString},
             updated_at = NOW()
           WHERE stripe_subscription_id = ${subscription.id}
         `
-        console.log('✅ Updated subscription status (without date)')
-        break
+        console.log('✅ Updated subscription in database (with all fields)')
+      } else {
+        await sql`
+          UPDATE subscriptions
+          SET 
+            status = ${dbStatus},
+            tier = ${tier},
+            monthly_limit = ${monthlyLimit},
+            guest_passes_limit = ${guestPassesLimit},
+            price = ${price},
+            updated_at = NOW()
+          WHERE stripe_subscription_id = ${subscription.id}
+        `
+        console.log('✅ Updated subscription in database (without date)')
       }
-
-      const nextBillingDate = new Date(subscription.current_period_end * 1000)
       
-      // Validate the date is valid
-      if (isNaN(nextBillingDate.getTime())) {
-        console.error('❌ Invalid date created from current_period_end:', subscription.current_period_end)
-        // Update status only if date is invalid
-        await sql`
-          UPDATE subscriptions
-          SET 
-            status = ${subscription.status},
-            updated_at = NOW()
-          WHERE stripe_subscription_id = ${subscription.id}
-        `
-        console.log('✅ Updated subscription status (date was invalid)')
-        break
+      if (dbStatus === 'canceled') {
+        console.log('⚠️ Subscription has been canceled')
       }
-
-      const dateString = nextBillingDate.toISOString().split('T')[0]
-      console.log('📅 Next billing date:', dateString)
-
-      await sql`
-        UPDATE subscriptions
-        SET 
-          status = ${subscription.status},
-          next_billing_date = ${dateString},
-          updated_at = NOW()
-        WHERE stripe_subscription_id = ${subscription.id}
-      `
-      console.log('✅ Updated subscription in database')
       break
     }
 

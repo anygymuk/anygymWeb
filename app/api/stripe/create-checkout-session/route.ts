@@ -84,6 +84,42 @@ export async function POST(request: NextRequest) {
     console.log('[create-checkout-session] Creating checkout session for price:', priceId)
     console.log('[create-checkout-session] Customer ID:', customerId)
     
+    // Cancel any existing active subscriptions in Stripe before creating a new one
+    try {
+      const existingSubscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'active',
+        limit: 10,
+      })
+      
+      if (existingSubscriptions.data.length > 0) {
+        console.log(`[create-checkout-session] Found ${existingSubscriptions.data.length} active subscription(s), cancelling...`)
+        for (const sub of existingSubscriptions.data) {
+          try {
+            // Cancel in Stripe
+            await stripe.subscriptions.cancel(sub.id)
+            console.log(`[create-checkout-session] Cancelled subscription in Stripe: ${sub.id}`)
+            
+            // Also update database immediately to avoid race conditions
+            await sql`
+              UPDATE subscriptions
+              SET 
+                status = 'canceled',
+                updated_at = NOW()
+              WHERE stripe_subscription_id = ${sub.id}
+            `
+            console.log(`[create-checkout-session] Marked subscription as canceled in database: ${sub.id}`)
+          } catch (cancelError: any) {
+            console.error(`[create-checkout-session] Error cancelling subscription ${sub.id}:`, cancelError.message)
+            // Continue with other subscriptions even if one fails
+          }
+        }
+      }
+    } catch (listError: any) {
+      console.warn('[create-checkout-session] Error listing existing subscriptions:', listError.message)
+      // Continue with checkout session creation even if we can't cancel existing subscriptions
+    }
+    
     // Get product and price details to extract metadata
     const price = await stripe.prices.retrieve(priceId)
     const product = await stripe.products.retrieve(price.product as string)

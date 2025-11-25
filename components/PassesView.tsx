@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Subscription, GymPass } from '@/lib/types'
-import Link from 'next/link'
+import TermsModal from '@/components/TermsModal'
 
 interface PassHistoryItem {
   gym: {
@@ -39,7 +40,11 @@ export default function PassesView({
   passHistory,
   passesInBillingPeriod,
 }: PassesViewProps) {
+  const router = useRouter()
   const [expandedGyms, setExpandedGyms] = useState<Set<number>>(new Set())
+  const [showTermsModal, setShowTermsModal] = useState<{ gymId: number; chain: any } | null>(null)
+  const [loadingGymId, setLoadingGymId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
   
   // Debug logging with error handling
   useEffect(() => {
@@ -123,6 +128,88 @@ export default function PassesView({
       }
       return newSet
     })
+  }
+
+  const handleGenerateNewPass = async (gymId: number, chain?: any) => {
+    setError(null)
+
+    try {
+      // If chain data is available, check for terms
+      if (chain) {
+        const hasTerms = 
+          (chain.terms && typeof chain.terms === 'string' && chain.terms.trim() !== '') || 
+          (chain.use_terms_url && chain.terms_url && typeof chain.terms_url === 'string' && chain.terms_url.trim() !== '')
+        const hasHealthStatement =
+          (chain.health_statement && typeof chain.health_statement === 'string' && chain.health_statement.trim() !== '') ||
+          (chain.use_health_statement_url && chain.health_statement_url && typeof chain.health_statement_url === 'string' && chain.health_statement_url.trim() !== '')
+
+        if (hasTerms || hasHealthStatement) {
+          // Show terms modal
+          setShowTermsModal({ gymId, chain })
+          return
+        }
+      } else {
+        // Fetch chain data to check for terms
+        try {
+          const response = await fetch(`/api/gyms/${gymId}`)
+          if (response.ok) {
+            const data = await response.json()
+            if (data.chain) {
+              const chainData = data.chain
+              const hasTerms = 
+                (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '') || 
+                (chainData.use_terms_url && chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '')
+              const hasHealthStatement =
+                (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '') ||
+                (chainData.use_health_statement_url && chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '')
+
+              if (hasTerms || hasHealthStatement) {
+                // Show terms modal
+                setShowTermsModal({ gymId, chain: chainData })
+                return
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.error('Error fetching gym chain data:', fetchError)
+          // Continue to generate pass without terms check
+        }
+      }
+
+      // No terms or couldn't fetch, generate directly
+      await generatePass(gymId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      setLoadingGymId(null)
+    }
+  }
+
+  const generatePass = async (gymId: number) => {
+    setShowTermsModal(null)
+    setLoadingGymId(gymId)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/passes/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ gymId: gymId.toString() }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate pass')
+      }
+
+      // Redirect to passes page to see the newly generated pass
+      router.push('/passes')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      setLoadingGymId(null)
+    }
   }
 
   return (
@@ -235,32 +322,136 @@ export default function PassesView({
             </h2>
           </div>
           {activePasses.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {activePasses.map((pass) => (
-                <Link
+                <div
                   key={pass.id}
-                  href={`/passes/${pass.id}`}
-                  className="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="relative p-6 rounded-2xl bg-green-50 dark:bg-green-900/20 shadow-lg border border-green-100 dark:border-green-800"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white">
-                        {pass.gym?.name}
-                      </h3>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Valid until:{' '}
-                        {pass.validUntil.toLocaleDateString()}{' '}
-                        {pass.validUntil.toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
-                    </div>
-                    <span className="px-3 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs font-medium rounded-full">
+                  {/* Active Status Badge - Top Right */}
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-800 rounded-lg">
+                    <svg
+                      className="w-4 h-4 text-green-600 dark:text-green-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
                       Active
                     </span>
                   </div>
-                </Link>
+
+                  <div className="flex flex-col md:flex-row gap-6 pr-24">
+                    {/* Left Side - Pass Information */}
+                    <div className="flex-1 space-y-3">
+                      {/* Gym Name */}
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+                          {pass.gym?.name || 'Unknown Gym'}
+                        </h3>
+                      </div>
+
+                      {/* Address with Location Icon */}
+                      {(pass.gym?.address || pass.gym?.city || pass.gym?.postcode) && (
+                        <div className="flex items-start gap-2">
+                          <svg
+                            className="w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5 flex-shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                          </svg>
+                          <p className="text-sm text-gray-700 dark:text-gray-300">
+                            {[
+                              pass.gym?.address,
+                              pass.gym?.city,
+                              pass.gym?.postcode,
+                            ]
+                              .filter(Boolean)
+                              .join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Valid Until with Clock Icon */}
+                      <div className="flex items-start gap-2">
+                        <svg
+                          className="w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5 flex-shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                          Valid until{' '}
+                          {pass.validUntil.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}{' '}
+                          {pass.validUntil.toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          })}
+                        </p>
+                      </div>
+
+                      {/* Pass Code - White Box */}
+                      {pass.passCode && (
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mt-4">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            Pass Code
+                          </p>
+                          <p className="text-base font-mono font-bold text-gray-900 dark:text-white break-all">
+                            {pass.passCode}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Side - QR Code */}
+                    {pass.passCode && (
+                      <div className="flex flex-col items-center">
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pass.passCode)}`}
+                            alt="Pass QR Code"
+                            className="w-32 h-32"
+                          />
+                        </div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2">
+                          Scan at gym
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           ) : (
@@ -298,6 +489,11 @@ export default function PassesView({
               </span>
             )}
           </div>
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
+              {error}
+            </div>
+          )}
           {passHistory.length > 0 ? (
             <div className="space-y-2">
               {passHistory.map((item) => {
@@ -308,11 +504,11 @@ export default function PassesView({
                     className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
                   >
                     {/* Accordion Header */}
-                    <button
-                      onClick={() => toggleGym(item.gym.id)}
-                      className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
+                    <div className="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                      <button
+                        onClick={() => toggleGym(item.gym.id)}
+                        className="flex items-center gap-3 flex-1 text-left"
+                      >
                         {item.chain?.logo_url ? (
                           <img
                             src={item.chain.logo_url}
@@ -336,7 +532,7 @@ export default function PassesView({
                             </p>
                           )}
                         </div>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-4">
                         <div className="text-right">
                           <p className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -350,23 +546,53 @@ export default function PassesView({
                             }) : 'N/A'}
                           </p>
                         </div>
-                        <svg
-                          className={`w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform ${
-                            isExpanded ? 'rotate-180' : ''
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleGenerateNewPass(item.gym.id, item.chain)
+                          }}
+                          disabled={loadingGymId === item.gym.id}
+                          className="px-4 py-2 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center gap-2 whitespace-nowrap"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
+                          {loadingGymId === item.gym.id ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                              Generate New Pass
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => toggleGym(item.gym.id)}
+                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
+                        >
+                          <svg
+                            className={`w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform ${
+                              isExpanded ? 'rotate-180' : ''
+                            }`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </svg>
+                        </button>
                       </div>
-                    </button>
+                    </div>
 
                     {/* Accordion Content */}
                     {isExpanded && (
@@ -377,12 +603,11 @@ export default function PassesView({
                             const isUsed = !!pass.usedAt
                             
                             return (
-                              <Link
+                              <div
                                 key={pass.id}
-                                href={`/passes/${pass.id}`}
-                                className="block p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                                className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
                               >
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-start justify-between">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-1">
                                       <span
@@ -412,21 +637,8 @@ export default function PassesView({
                                       })}
                                     </p>
                                   </div>
-                                  <svg
-                                    className="w-5 h-5 text-gray-400"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M9 5l7 7-7 7"
-                                    />
-                                  </svg>
                                 </div>
-                              </Link>
+                              </div>
                             )
                           })}
                         </div>
@@ -442,6 +654,19 @@ export default function PassesView({
             </div>
           )}
       </div>
+
+      {/* Terms Modal */}
+      {showTermsModal && (
+        <TermsModal
+          chain={showTermsModal.chain}
+          onAccept={() => generatePass(showTermsModal.gymId)}
+          onCancel={() => {
+            setShowTermsModal(null)
+            setLoadingGymId(null)
+            setError(null)
+          }}
+        />
+      )}
     </div>
   )
 }
