@@ -41,11 +41,11 @@ export default function DashboardLayout({
       ),
     },
     {
-      name: 'Subscription',
-      href: '/subscription',
+      name: 'Profile',
+      href: '/profile',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.673 0-8 1.336-8 4v2h16v-2c0-2.664-5.327-4-8-4z" />
         </svg>
       ),
     },
@@ -53,8 +53,8 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+      {/* Sidebar - Hidden on mobile */}
+      <aside className="hidden lg:flex w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col">
         {/* Logo */}
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <Logo />
@@ -70,7 +70,7 @@ export default function DashboardLayout({
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-blue-50 text-blue-600 font-semibold dark:bg-blue-900/20 dark:text-blue-400'
+                    ? 'bg-[#FF6B6B] text-white font-semibold'
                     : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
                 }`}
               >
@@ -100,9 +100,34 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden pb-16 lg:pb-0">
         {children}
       </main>
+
+      {/* Bottom Navigation - Mobile Only */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 lg:hidden z-50">
+        <div className="flex justify-around items-center h-16">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href || (item.href === '/dashboard' && pathname?.startsWith('/dashboard'))
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
+                  isActive
+                    ? 'text-orange-500 dark:text-orange-400'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                <div className={`${isActive ? 'text-orange-500 dark:text-orange-400' : ''}`}>
+                  {item.icon}
+                </div>
+                <span className="text-xs mt-1 font-medium">{item.name}</span>
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
     </div>
   )
 }

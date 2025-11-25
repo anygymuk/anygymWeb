@@ -185,7 +185,7 @@ export default function GymDetailsPanel({
   const openingHours = gym.opening_hours || {}
 
   return (
-    <div className="absolute bottom-0 right-0 w-full md:w-[500px] bg-white dark:bg-gray-800 shadow-2xl rounded-t-lg md:rounded-tl-lg max-h-[80vh] overflow-y-auto z-50">
+    <div className="fixed inset-0 md:inset-auto md:bottom-0 md:right-0 w-full md:w-[500px] bg-white dark:bg-gray-800 shadow-2xl md:rounded-tl-lg h-screen md:h-auto md:max-h-[85vh] overflow-y-auto z-50">
       {/* Close button */}
       <button
         onClick={onClose}
@@ -207,28 +207,30 @@ export default function GymDetailsPanel({
         </svg>
       </button>
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {/* Header */}
         <div className="mb-4">
           <span className="inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 mb-2">
             {gym.required_tier}
           </span>
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
             {gym.name}
           </h2>
           {chain && (
-            <div className="flex items-center gap-2 mb-2">
-              {chain.logo_url && (
-                <img
-                  src={chain.logo_url}
-                  alt={chain.name}
-                  className="h-8 w-auto"
-                />
-              )}
-              <span className="text-gray-600 dark:text-gray-400 font-medium">
+            <>
+              <div className="flex items-center gap-2 mb-4">
+                {chain.logo_url && (
+                  <img
+                    src={chain.logo_url}
+                    alt={chain.name}
+                    className="h-12 w-auto"
+                  />
+                )}
+              </div>
+              <p className="text-gray-600 dark:text-gray-400 font-medium">
                 {chain.name}
-              </span>
-            </div>
+              </p>
+            </>
           )}
           <p className="text-gray-600 dark:text-gray-400">
             {gym.address}, {gym.city} {gym.postcode}
@@ -268,7 +270,7 @@ export default function GymDetailsPanel({
             <button
               onClick={handleGeneratePassClick}
               disabled={loading}
-              className="block w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center font-semibold mb-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="block w-full px-6 py-3 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors text-center font-semibold mb-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Generating...' : 'Generate Pass'}
             </button>
@@ -277,7 +279,7 @@ export default function GymDetailsPanel({
               <div className="flex gap-2 mb-2">
                 <Link
                   href="/subscription"
-                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center font-semibold"
+                  className="flex-1 px-6 py-3 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors text-center font-semibold"
                 >
                   Get a Subscription
                 </Link>

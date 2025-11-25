@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       // User doesn't exist, create them
       try {
         const insertResult = await sql`
-          INSERT INTO app_users (auth0_id, email, name, created_at, updated_at)
+          INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
           VALUES (${auth0Id}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
           RETURNING id
         `

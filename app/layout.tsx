@@ -11,7 +11,7 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
-  title: 'AnyGym - Gym Pass Access',
+  title: 'anygym - Universal Gym Membership',
   description: 'Find and access gyms with flexible passes',
   icons: {
     icon: 'https://res.cloudinary.com/njh101010/image/upload/v1760889858/anygym/anygym.png',

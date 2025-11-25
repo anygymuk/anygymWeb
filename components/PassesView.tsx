@@ -152,14 +152,6 @@ export default function PassesView({
                       minWidth: displayPercentage > 0 ? '2px' : '0px' // Ensure visible even for small percentages
                     }}
                   />
-                  {/* Debug info - remove in production */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <div className="absolute -top-6 left-0 text-xs text-gray-500">
-                      {typeof displayPercentage === 'number' && !isNaN(displayPercentage) 
-                        ? `${displayPercentage.toFixed(2)}%` 
-                        : '0%'} ({passesCreated}/{monthlyLimit}) - passesInBillingPeriod: {passesInBillingPeriod}
-                    </div>
-                  )}
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   {visitsRemaining} passes remaining this billing period
@@ -325,7 +317,7 @@ export default function PassesView({
                           <img
                             src={item.chain.logo_url}
                             alt={item.chain.name}
-                            className="w-10 h-10 rounded-full object-cover"
+                            className="w-20 h-auto object-cover"
                           />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">

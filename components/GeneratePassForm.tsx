@@ -98,7 +98,7 @@ export default function GeneratePassForm({ gymId, chain }: GeneratePassFormProps
         <button
           type="submit"
           disabled={loading}
-          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          className="w-full px-6 py-3 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
         >
           {loading ? 'Generating...' : 'Generate Pass'}
         </button>

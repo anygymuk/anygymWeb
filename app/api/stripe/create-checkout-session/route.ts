@@ -115,8 +115,8 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: `${request.nextUrl.origin}/subscription?success=true`,
-      cancel_url: `${request.nextUrl.origin}/subscription?canceled=true`,
+      success_url: `${request.nextUrl.origin}/dashboard?onboarding=complete`,
+      cancel_url: `${request.nextUrl.origin}/onboarding?step=4&canceled=true`,
       metadata: {
         userId: userId,
         priceId: priceId,

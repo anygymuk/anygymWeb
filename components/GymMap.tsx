@@ -137,7 +137,7 @@ export default function GymMap({ gyms, selectedGym, onGymClick }: GymMapProps) {
                   )}
                   <button
                     onClick={() => onGymClick?.(gym)}
-                    className="mt-2 w-full px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                    className="mt-2 w-full px-3 py-1 bg-[#FF6B6B] text-white text-sm rounded hover:bg-[#FF5252]"
                   >
                     View Details
                   </button>

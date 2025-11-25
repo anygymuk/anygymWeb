@@ -36,7 +36,7 @@ export default function PassCard({ pass }: PassCardProps) {
       </div>
       <Link
         href={`/passes/${pass.id}`}
-        className="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+        className="block w-full text-center px-4 py-2 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors font-medium"
       >
         View Pass
       </Link>

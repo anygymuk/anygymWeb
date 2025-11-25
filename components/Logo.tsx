@@ -6,7 +6,7 @@ interface LogoProps {
   className?: string
 }
 
-export default function Logo({ href = '/dashboard', className = 'h-8 w-auto' }: LogoProps) {
+export default function Logo({ href = '/dashboard', className = 'h-4 w-auto' }: LogoProps) {
   return (
     <Link href={href} className="block">
       <img

@@ -4,6 +4,7 @@ import { sql } from '@/lib/db'
 import { Subscription, Gym } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import GymMapView from '@/components/GymMapView'
+import { getOrCreateAppUser } from '@/lib/user'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -100,6 +101,26 @@ export default async function Dashboard() {
 
     const userId = session.user.sub
     
+    // Check onboarding status - redirect if not completed
+    // This also creates the user if they don't exist
+    const { needsOnboarding, user } = await getOrCreateAppUser(
+      userId,
+      session.user.email,
+      session.user.name
+    )
+    
+    if (!user) {
+      console.error('[Dashboard] Failed to get or create user')
+      throw new Error('Failed to create user account')
+    }
+    
+    console.log('[Dashboard] User check complete - needsOnboarding:', needsOnboarding, 'auth0_id:', user.auth0_id)
+    
+    if (needsOnboarding) {
+      console.log('[Dashboard] Redirecting to onboarding')
+      redirect('/onboarding')
+    }
+    
     // Fetch data in parallel with error handling
     const [subscription, gyms, chains] = await Promise.allSettled([
       getUserSubscription(userId),
@@ -136,13 +157,13 @@ export default async function Dashboard() {
         userInitials={initials}
         subscription={subscriptionResult}
       >
-        <div className="flex-1 flex flex-col h-screen">
-          <div className="px-6 py-4">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <div className="flex-1 flex flex-col h-full min-h-0">
+          <div className="px-4 sm:px-6 py-4">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
               Find Your Gym
             </h1>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-h-0">
             <GymMapView 
               initialGyms={gymsResult} 
               chains={chainsResult}
@@ -152,7 +173,12 @@ export default async function Dashboard() {
         </div>
       </DashboardLayout>
     )
-  } catch (error) {
+  } catch (error: any) {
+    // Don't catch NEXT_REDIRECT errors - they need to propagate for Next.js redirects
+    if (error?.message === 'NEXT_REDIRECT' || error?.digest?.startsWith('NEXT_REDIRECT')) {
+      throw error
+    }
+    
     console.error('Error loading dashboard:', error)
     return (
       <div className="flex items-center justify-center h-screen">

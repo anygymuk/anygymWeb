@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 interface TermsModalProps {
   chain?: any | null
@@ -9,14 +9,9 @@ interface TermsModalProps {
 }
 
 export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProps) {
-  const [termsAccepted, setTermsAccepted] = useState(false)
-  const [healthAccepted, setHealthAccepted] = useState(false)
-
   const hasTerms = chain?.terms || (chain?.use_terms_url && chain?.terms_url)
   const hasHealthStatement =
     chain?.health_statement || (chain?.use_health_statement_url && chain?.health_statement_url)
-
-  const canAccept = (!hasTerms || termsAccepted) && (!hasHealthStatement || healthAccepted)
 
   return (
     <div
@@ -46,42 +41,68 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Terms & Conditions
                 </h3>
-                {chain?.use_terms_url && chain?.terms_url ? (
-                  <a
-                    href={chain.terms_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                  >
-                    View Full Terms →
-                  </a>
-                ) : null}
               </div>
-              {chain?.terms && (
-                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto">
-                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {chain.terms}
-                  </p>
+              {chain?.use_terms_url && chain?.terms_url ? (
+                // Show only URL link when use_terms_url is true
+                <div className="mb-3">
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-3">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      <a
+                        href={chain.terms_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+                      >
+                        View Terms and Conditions
+                        <svg
+                          className="ml-1 w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                          />
+                        </svg>
+                      </a>
+                    </p>
+                  </div>
                 </div>
-              )}
-              {chain?.use_terms_url && chain?.terms_url && !chain?.terms && (
-                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                  <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-                    Terms and conditions are available at the link above.
-                  </p>
+              ) : chain?.terms ? (
+                // Show inline terms text only when use_terms_url is false/not set
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto mb-3">
+                  <div className="text-sm text-gray-700 dark:text-gray-300">
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-2">{children}</p>,
+                        h1: ({ children }) => <h1 className="text-lg font-bold text-gray-900 dark:text-white mb-2">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-2">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">{children}</h3>,
+                        ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
+                        li: ({ children }) => <li>{children}</li>,
+                        strong: ({ children }) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
+                        em: ({ children }) => <em className="italic">{children}</em>,
+                        a: ({ href, children }) => (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+                          >
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {chain.terms}
+                    </ReactMarkdown>
+                  </div>
                 </div>
-              )}
-              <label className="flex items-start gap-3 mt-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={termsAccepted}
-                  onChange={(e) => setTermsAccepted(e.target.checked)}
-                  className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  I accept the terms and conditions
-                </span>
-              </label>
+              ) : null}
             </div>
           )}
 
@@ -92,44 +113,68 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Health Statement
                 </h3>
-                {chain?.use_health_statement_url && chain?.health_statement_url ? (
-                  <a
-                    href={chain.health_statement_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                  >
-                    View Full Statement →
-                  </a>
-                ) : null}
               </div>
-              {chain?.health_statement && (
-                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto">
-                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {chain.health_statement}
-                  </p>
-                </div>
-              )}
-              {chain?.use_health_statement_url &&
-                chain?.health_statement_url &&
-                !chain?.health_statement && (
-                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-                      Health statement is available at the link above.
+              {chain?.use_health_statement_url && chain?.health_statement_url ? (
+                // Show only URL link when use_health_statement_url is true
+                <div className="mb-3">
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-3">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      <a
+                        href={chain.health_statement_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+                      >
+                        View Health and Safety Statement
+                        <svg
+                          className="ml-1 w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                          />
+                        </svg>
+                      </a>
                     </p>
                   </div>
-                )}
-              <label className="flex items-start gap-3 mt-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={healthAccepted}
-                  onChange={(e) => setHealthAccepted(e.target.checked)}
-                  className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  I acknowledge the health statement
-                </span>
-              </label>
+                </div>
+              ) : chain?.health_statement ? (
+                // Show inline health statement text only when use_health_statement_url is false/not set
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto mb-3">
+                  <div className="text-sm text-gray-700 dark:text-gray-300">
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-2">{children}</p>,
+                        h1: ({ children }) => <h1 className="text-lg font-bold text-gray-900 dark:text-white mb-2">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-2">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">{children}</h3>,
+                        ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
+                        li: ({ children }) => <li>{children}</li>,
+                        strong: ({ children }) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
+                        em: ({ children }) => <em className="italic">{children}</em>,
+                        a: ({ href, children }) => (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
+                          >
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {chain.health_statement}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -150,8 +195,7 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
           </button>
           <button
             onClick={onAccept}
-            disabled={!canAccept}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            className="flex-1 px-4 py-2 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors font-medium"
           >
             Accept & Generate Pass
           </button>

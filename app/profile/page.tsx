@@ -1,10 +1,11 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
+import DashboardLayout from '@/components/DashboardLayout'
 import { sql } from '@/lib/db'
 import { Subscription } from '@/lib/types'
 import SubscriptionManager from '@/components/SubscriptionManager'
-import DashboardLayout from '@/components/DashboardLayout'
 import { StripeProduct } from '@/app/api/stripe/products/route'
+import ProfileTabs from '@/components/ProfileTabs'
 import { getOrCreateAppUser } from '@/lib/user'
 
 // Mark page as dynamic - uses cookies for authentication
@@ -46,20 +47,15 @@ async function getUserSubscription(userId: string): Promise<Subscription | null>
 
 async function getStripeProducts(): Promise<StripeProduct[]> {
   try {
-    // Use internal API call - we need to make this work server-side
-    // For server-side, we'll call the Stripe API directly
     const { stripe } = await import('@/lib/stripe')
     
-    // Check if Stripe is properly configured
     const stripeKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
     if (!stripeKey) {
-      // Don't log environment variable names - could trigger secrets scanner
       console.error('[getStripeProducts] Stripe API key is not configured')
       return []
     }
     
     console.log('[getStripeProducts] Fetching products from Stripe...')
-    // Don't log Stripe key even partially - could trigger secrets scanner
     
     const products = await stripe.products.list({
       active: true,
@@ -82,7 +78,6 @@ async function getStripeProducts(): Promise<StripeProduct[]> {
       })
     )
 
-    // Map products to our format (same logic as API route)
     const mappedProducts: StripeProduct[] = productsWithPrices.map((product) => {
       let tier = 'standard'
       let monthlyLimit = 8
@@ -126,7 +121,6 @@ async function getStripeProducts(): Promise<StripeProduct[]> {
       const recurringPrice = product.prices.find((p) => p.recurring?.interval === 'month')
       const price = recurringPrice ? (recurringPrice.unit_amount || 0) / 100 : 0
       
-      // Log if product doesn't have a monthly price
       if (!recurringPrice) {
         console.warn(`[getStripeProducts] Product "${product.name}" (${product.id}) has no monthly recurring price`)
       }
@@ -185,10 +179,10 @@ async function getStripeProducts(): Promise<StripeProduct[]> {
   }
 }
 
-export default async function SubscriptionPage({
+export default async function ProfilePage({
   searchParams,
 }: {
-  searchParams?: { success?: string; canceled?: string }
+  searchParams?: { success?: string; canceled?: string; tab?: string }
 }) {
   const session = await getSession()
 
@@ -196,9 +190,11 @@ export default async function SubscriptionPage({
     redirect('/api/auth/login')
   }
 
+  const userId = session.user.sub
+  
   // Check onboarding status - redirect if not completed
   const { needsOnboarding } = await getOrCreateAppUser(
-    session.user.sub,
+    userId,
     session.user.email,
     session.user.name
   )
@@ -206,13 +202,43 @@ export default async function SubscriptionPage({
   if (needsOnboarding) {
     redirect('/onboarding')
   }
+  const [subscription, products] = await Promise.all([
+    getUserSubscription(userId),
+    getStripeProducts(),
+  ])
 
-  // Redirect to profile page with subscription tab
-  const params = new URLSearchParams()
-  if (searchParams?.success) params.set('success', 'true')
-  if (searchParams?.canceled) params.set('canceled', 'true')
-  params.set('tab', 'subscription')
-  
-  redirect(`/profile?${params.toString()}`)
+  // Get user initials for avatar
+  const userName = session.user.name || session.user.email || 'User'
+  const initials = userName
+    .split(' ')
+    .map((n: string) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+
+  return (
+    <DashboardLayout
+      userName={userName}
+      userInitials={initials}
+      subscription={subscription}
+    >
+      <div className="flex-1 flex flex-col h-full overflow-y-auto">
+        <div className="px-4 sm:px-6 py-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-6">
+            Profile
+          </h1>
+          
+          <ProfileTabs
+            userEmail={session.user.email || ''}
+            userName={userName}
+            userInitials={initials}
+            subscription={subscription}
+            products={products}
+            searchParams={searchParams}
+          />
+        </div>
+      </div>
+    </DashboardLayout>
+  )
 }
 

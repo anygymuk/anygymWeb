@@ -5,6 +5,7 @@ import { GymPass, Subscription } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import PassesView from '@/components/PassesView'
 import AccountSetupError from '@/components/AccountSetupError'
+import { getOrCreateAppUser } from '@/lib/user'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -109,7 +110,7 @@ async function getAppUserId(auth0Id: string, userEmail?: string, userName?: stri
       }
       
       const insertResult = await sql`
-        INSERT INTO app_users (auth0_id, email, name, created_at, updated_at)
+        INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
         VALUES (${normalizedAuth0Id}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
         RETURNING id
       `
@@ -744,6 +745,17 @@ export default async function PassesPage() {
   const userEmail = session.user.email
   const userName = session.user.name
   
+  // Check onboarding status - redirect if not completed
+  const { needsOnboarding } = await getOrCreateAppUser(
+    auth0Id,
+    userEmail,
+    userName
+  )
+  
+  if (needsOnboarding) {
+    redirect('/onboarding')
+  }
+  
   console.log('[PassesPage] ==========================================')
   console.log('[PassesPage] Auth0 ID:', auth0Id)
   console.log('[PassesPage] Session user:', {
@@ -760,7 +772,7 @@ export default async function PassesPage() {
     if (process.env.NODE_ENV === 'development') {
       try {
         const allUsers = await sql`
-          SELECT id, auth0_id, email, name FROM app_users 
+          SELECT id, auth0_id, email, full_name FROM app_users 
           ORDER BY created_at DESC 
           LIMIT 10
         `
@@ -794,7 +806,7 @@ export default async function PassesPage() {
           // Try to create the user
           try {
             const insertResult = await sql`
-              INSERT INTO app_users (auth0_id, email, name, created_at, updated_at)
+              INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
               VALUES (${auth0Id.trim()}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
               RETURNING id
             `
@@ -912,7 +924,7 @@ export default async function PassesPage() {
         console.log('[PassesPage] Passes exist, creating user entry...')
         try {
           const createUserResult = await sql`
-            INSERT INTO app_users (auth0_id, email, name, created_at, updated_at)
+            INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
             VALUES (${auth0Id.trim()}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
             RETURNING id
           `
