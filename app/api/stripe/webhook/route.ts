@@ -165,7 +165,7 @@ async function handleOtherEvents(event: Stripe.Event) {
       }
 
       // Handle cancellation - if status is canceled, mark as canceled in DB
-      const dbStatus = subscription.status === 'canceled' || subscription.status === 'cancelled' 
+      const dbStatus = subscription.status === 'canceled'
         ? 'canceled' 
         : subscription.status
 
