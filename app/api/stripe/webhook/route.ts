@@ -179,28 +179,54 @@ async function processCheckoutSession(
       ? new Date(subscription.current_period_end * 1000)
       : new Date()
 
+    // Log subscription data before insertion
+    console.log('📝 Subscription data to insert:')
+    console.log('  - user_id (auth0_id):', auth0Id)
+    console.log('  - tier:', tier)
+    console.log('  - monthly_limit:', monthlyLimit)
+    console.log('  - guest_passes_limit:', guestPassesLimit)
+    console.log('  - price:', price)
+    console.log('  - start_date:', startDate.toISOString().split('T')[0])
+    console.log('  - next_billing_date:', nextBillingDate.toISOString().split('T')[0])
+    console.log('  - stripe_subscription_id:', subscriptionId || null)
+    console.log('  - stripe_customer_id:', session.customer as string)
+
     // Create new subscription in database
-    await sql`
-      INSERT INTO subscriptions (
-        user_id, tier, monthly_limit, price, start_date, next_billing_date,
-        visits_used, status, stripe_subscription_id, stripe_customer_id,
-        guest_passes_limit, guest_passes_used
-      ) VALUES (
-        ${auth0Id},
-        ${tier},
-        ${monthlyLimit},
-        ${price},
-        ${startDate.toISOString().split('T')[0]},
-        ${nextBillingDate.toISOString().split('T')[0]},
-        0,
-        'active',
-        ${subscriptionId || null},
-        ${session.customer as string},
-        ${guestPassesLimit},
-        0
-      )
-    `
-    console.log('✅ Created subscription in database')
+    try {
+      const insertResult = await sql`
+        INSERT INTO subscriptions (
+          user_id, tier, monthly_limit, price, start_date, next_billing_date,
+          visits_used, status, stripe_subscription_id, stripe_customer_id,
+          guest_passes_limit, guest_passes_used, created_at, updated_at
+        ) VALUES (
+          ${auth0Id},
+          ${tier},
+          ${monthlyLimit},
+          ${price},
+          ${startDate.toISOString().split('T')[0]},
+          ${nextBillingDate.toISOString().split('T')[0]},
+          0,
+          'active',
+          ${subscriptionId || null},
+          ${session.customer as string},
+          ${guestPassesLimit},
+          0,
+          NOW(),
+          NOW()
+        )
+        RETURNING id
+      `
+      console.log('✅ Created subscription in database with ID:', insertResult[0]?.id)
+    } catch (insertError: any) {
+      console.error('❌ Failed to create subscription in database:')
+      console.error('  Error message:', insertError?.message)
+      console.error('  Error code:', insertError?.code)
+      console.error('  Error detail:', insertError?.detail)
+      console.error('  Error hint:', insertError?.hint)
+      console.error('  Full error:', JSON.stringify(insertError, null, 2))
+      // Re-throw to ensure the error is logged but don't break the webhook
+      throw insertError
+    }
 
     // Get user's postcode from Stripe customer metadata
     let postcode = customerObj.metadata?.postcode || null
