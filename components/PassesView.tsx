@@ -343,9 +343,6 @@ export default function PassesView({
                         d="M5 13l4 4L19 7"
                       />
                     </svg>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      Active
-                    </span>
                   </div>
 
                   <div className="flex flex-col md:flex-row gap-6 pr-24">

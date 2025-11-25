@@ -278,11 +278,45 @@ async function getUserSubscription(appUserId: number | null, auth0Id?: string): 
   }
 }
 
+async function updateExpiredPasses(appUserId: number | null, auth0Id?: string): Promise<void> {
+  try {
+    const now = new Date()
+    console.log('[updateExpiredPasses] Updating expired passes for appUserId:', appUserId, 'auth0Id:', auth0Id)
+    
+    // Update passes that have expired (valid_until < now) and are still marked as 'active'
+    if (appUserId && appUserId > 0) {
+      const updateResult = await sql`
+        UPDATE gym_passes
+        SET status = 'expired', updated_at = NOW()
+        WHERE (user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''})
+          AND status = 'active'
+          AND valid_until < ${now.toISOString()}
+      `
+      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.count || 0)
+    } else {
+      const updateResult = await sql`
+        UPDATE gym_passes
+        SET status = 'expired', updated_at = NOW()
+        WHERE user_id = ${auth0Id || ''}
+          AND status = 'active'
+          AND valid_until < ${now.toISOString()}
+      `
+      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.count || 0)
+    }
+  } catch (error) {
+    console.error('[updateExpiredPasses] Error updating expired passes:', error)
+    // Don't throw - allow the function to continue even if update fails
+  }
+}
+
 async function getActivePasses(appUserId: number | null, auth0Id?: string): Promise<GymPass[]> {
   try {
     console.log('[getActivePasses] Fetching active passes for appUserId:', appUserId)
     console.log('[getActivePasses] appUserId type:', typeof appUserId)
     console.log('[getActivePasses] auth0Id:', auth0Id)
+    
+    // Update expired passes before fetching active ones
+    await updateExpiredPasses(appUserId, auth0Id)
     
     // First, check if any passes exist for this user at all
     // Use direct string comparison - don't cast if user_id is already text
@@ -592,6 +626,9 @@ async function getPassHistory(appUserId: number | null, auth0Id?: string) {
     console.log('[getPassHistory] Fetching pass history for appUserId:', appUserId)
     console.log('[getPassHistory] appUserId type:', typeof appUserId)
     console.log('[getPassHistory] auth0Id:', auth0Id)
+    
+    // Update expired passes before fetching history
+    await updateExpiredPasses(appUserId, auth0Id)
     
     const now = new Date()
     let result

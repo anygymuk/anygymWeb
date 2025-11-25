@@ -44,6 +44,22 @@ export async function POST(request: NextRequest) {
 
     console.log('🏋️ [generatePass] Generating pass for gym:', gymId)
 
+    // Update expired passes for this user before generating a new one
+    const now = new Date()
+    try {
+      await sql`
+        UPDATE gym_passes
+        SET status = 'expired', updated_at = NOW()
+        WHERE user_id = ${auth0Id}
+          AND status = 'active'
+          AND valid_until < ${now.toISOString()}
+      `
+      console.log('✅ [generatePass] Updated expired passes')
+    } catch (updateError: any) {
+      console.error('⚠️ [generatePass] Error updating expired passes (non-fatal):', updateError.message)
+      // Continue with pass generation even if update fails
+    }
+
     // Get user from app_users table
     const userResult = await sql`
       SELECT * FROM app_users 
