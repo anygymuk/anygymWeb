@@ -170,15 +170,20 @@ export async function getOrCreateAppUser(
           // If we got here, user exists but columns don't - still require onboarding
           // (user can complete onboarding even if columns don't exist - migration should be run)
           if (result && result.length > 0) {
+            const row = result[0]
+            if (!row.auth0_id) {
+              console.error('[getOrCreateAppUser] User row missing auth0_id in fallback')
+              return { user: null, needsOnboarding: true }
+            }
             console.warn('[getOrCreateAppUser] Onboarding columns not found - user exists but will need onboarding. Please run migration: migrations/add_onboarding_columns.sql')
             return {
               user: {
-                auth0_id: result[0].auth0_id,
-                email: result[0].email,
-                name: result[0].full_name,
+                auth0_id: row.auth0_id,
+                email: row.email ?? undefined,
+                name: row.full_name ?? undefined,
                 onboarding_completed: false,
-                created_at: new Date(result[0].created_at),
-                updated_at: new Date(result[0].updated_at),
+                created_at: row.created_at ? new Date(row.created_at) : new Date(),
+                updated_at: row.updated_at ? new Date(row.updated_at) : new Date(),
               },
               needsOnboarding: true, // Still require onboarding
             }
@@ -198,20 +203,24 @@ export async function getOrCreateAppUser(
 
   if (result && result.length > 0) {
     const row = result[0]
+    if (!row.auth0_id) {
+      console.error('[getOrCreateAppUser] User row missing auth0_id')
+      return { user: null, needsOnboarding: true }
+    }
     const user: AppUser = {
       auth0_id: row.auth0_id,
-      email: row.email,
-      name: row.full_name,
-      date_of_birth: row.date_of_birth || undefined,
-      address_line1: row.address_line1 || undefined,
-      address_line2: row.address_line2 || undefined,
-      address_city: row.address_city || undefined,
-      address_postcode: row.address_postcode || undefined,
-      emergency_contact_name: row.emergency_contact_name || undefined,
-      emergency_contact_number: row.emergency_contact_number || undefined,
+      email: row.email ?? undefined,
+      name: row.full_name ?? undefined,
+      date_of_birth: row.date_of_birth ?? undefined,
+      address_line1: row.address_line1 ?? undefined,
+      address_line2: row.address_line2 ?? undefined,
+      address_city: row.address_city ?? undefined,
+      address_postcode: row.address_postcode ?? undefined,
+      emergency_contact_name: row.emergency_contact_name ?? undefined,
+      emergency_contact_number: row.emergency_contact_number ?? undefined,
       onboarding_completed: row.onboarding_completed === true || false,
-      created_at: new Date(row.created_at),
-      updated_at: new Date(row.updated_at),
+      created_at: row.created_at ? new Date(row.created_at) : new Date(),
+      updated_at: row.updated_at ? new Date(row.updated_at) : new Date(),
     }
     return {
       user,
@@ -290,20 +299,24 @@ export async function getOrCreateAppUser(
 
     if (insertResult && insertResult.length > 0) {
       const row = insertResult[0]
+      if (!row.auth0_id) {
+        console.error('[getOrCreateAppUser] Insert result missing auth0_id')
+        return { user: null, needsOnboarding: true }
+      }
       const user: AppUser = {
         auth0_id: row.auth0_id,
-        email: row.email,
-        name: row.full_name,
-        date_of_birth: row.date_of_birth || undefined,
-        address_line1: row.address_line1 || undefined,
-      address_line2: row.address_line2 || undefined,
-      address_city: row.address_city || undefined,
-      address_postcode: row.address_postcode || undefined,
-        emergency_contact_name: row.emergency_contact_name || undefined,
-        emergency_contact_number: row.emergency_contact_number || undefined,
+        email: row.email ?? undefined,
+        name: row.full_name ?? undefined,
+        date_of_birth: row.date_of_birth ?? undefined,
+        address_line1: row.address_line1 ?? undefined,
+        address_line2: row.address_line2 ?? undefined,
+        address_city: row.address_city ?? undefined,
+        address_postcode: row.address_postcode ?? undefined,
+        emergency_contact_name: row.emergency_contact_name ?? undefined,
+        emergency_contact_number: row.emergency_contact_number ?? undefined,
         onboarding_completed: row.onboarding_completed === true || false,
-        created_at: new Date(row.created_at),
-        updated_at: new Date(row.updated_at),
+        created_at: row.created_at ? new Date(row.created_at) : new Date(),
+        updated_at: row.updated_at ? new Date(row.updated_at) : new Date(),
       }
       console.log('[getOrCreateAppUser] Successfully created user:', user.auth0_id, 'needsOnboarding: true')
       return {
@@ -350,14 +363,19 @@ export async function getOrCreateAppUser(
             LIMIT 1
           `
           if (result.length > 0) {
+            const row = result[0]
+            if (!row.auth0_id) {
+              console.error('[getOrCreateAppUser] User row missing auth0_id in unique constraint fallback')
+              return { user: null, needsOnboarding: true }
+            }
             return {
               user: {
-                auth0_id: result[0].auth0_id,
-                email: result[0].email,
-                name: result[0].full_name,
+                auth0_id: row.auth0_id,
+                email: row.email ?? undefined,
+                name: row.full_name ?? undefined,
                 onboarding_completed: false,
-                created_at: new Date(result[0].created_at),
-                updated_at: new Date(result[0].updated_at),
+                created_at: row.created_at ? new Date(row.created_at) : new Date(),
+                updated_at: row.updated_at ? new Date(row.updated_at) : new Date(),
               },
               needsOnboarding: true,
             }
@@ -368,20 +386,24 @@ export async function getOrCreateAppUser(
       }
       if (result && result.length > 0) {
         const row = result[0]
+        if (!row.auth0_id) {
+          console.error('[getOrCreateAppUser] User row missing auth0_id in unique constraint handler')
+          return { user: null, needsOnboarding: true }
+        }
         const user: AppUser = {
           auth0_id: row.auth0_id,
-          email: row.email,
-          name: row.full_name,
-          date_of_birth: row.date_of_birth || undefined,
-          address_line1: row.address_line1 || undefined,
-      address_line2: row.address_line2 || undefined,
-      address_city: row.address_city || undefined,
-      address_postcode: row.address_postcode || undefined,
-          emergency_contact_name: row.emergency_contact_name || undefined,
-          emergency_contact_number: row.emergency_contact_number || undefined,
+          email: row.email ?? undefined,
+          name: row.full_name ?? undefined,
+          date_of_birth: row.date_of_birth ?? undefined,
+          address_line1: row.address_line1 ?? undefined,
+          address_line2: row.address_line2 ?? undefined,
+          address_city: row.address_city ?? undefined,
+          address_postcode: row.address_postcode ?? undefined,
+          emergency_contact_name: row.emergency_contact_name ?? undefined,
+          emergency_contact_number: row.emergency_contact_number ?? undefined,
           onboarding_completed: row.onboarding_completed === true || false,
-          created_at: new Date(row.created_at),
-          updated_at: new Date(row.updated_at),
+          created_at: row.created_at ? new Date(row.created_at) : new Date(),
+          updated_at: row.updated_at ? new Date(row.updated_at) : new Date(),
         }
         return {
           user,
