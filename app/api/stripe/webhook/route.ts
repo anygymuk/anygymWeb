@@ -19,14 +19,30 @@ if (process.env.SENDGRID_API_KEY) {
 export async function POST(request: NextRequest) {
   console.log('🔔 Stripe webhook received')
 
+  // Get raw body as text for signature verification
   const body = await request.text()
   const signature = request.headers.get('stripe-signature')
 
-  if (!signature || !webhookSecret) {
-    console.error('❌ Missing webhook signature or secret')
+  // Log for debugging (but don't log the full body in production)
+  console.log('📋 Webhook signature present:', !!signature)
+  console.log('📋 Webhook secret configured:', !!webhookSecret)
+  console.log('📋 Body length:', body.length)
+  console.log('📋 Body preview (first 100 chars):', body.substring(0, 100))
+
+  if (!signature) {
+    console.error('❌ Missing webhook signature header')
+    console.error('📋 Available headers:', Object.fromEntries(request.headers.entries()))
+    return NextResponse.json(
+      { error: 'Missing signature' },
+      { status: 400 }
+    )
+  }
+
+  if (!webhookSecret) {
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable')
     return NextResponse.json(
       { error: 'Configuration error' },
-      { status: 400 }
+      { status: 500 }
     )
   }
 
@@ -35,8 +51,21 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
     console.log('✅ Webhook verified:', event.type)
+    console.log('📋 Event ID:', event.id)
   } catch (err: any) {
     console.error('❌ Invalid signature:', err.message)
+    console.error('❌ Error type:', err.type)
+    console.error('❌ Signature header value:', signature?.substring(0, 50) + '...')
+    console.error('❌ Webhook secret prefix:', webhookSecret?.substring(0, 10) + '...')
+    
+    // For debugging: log if this might be a secret mismatch
+    if (err.message.includes('No signatures found')) {
+      console.error('⚠️ This usually means:')
+      console.error('  1. Wrong webhook secret (check STRIPE_WEBHOOK_SECRET)')
+      console.error('  2. Body was modified before reaching this handler')
+      console.error('  3. Using test mode secret for live events (or vice versa)')
+    }
+    
     return NextResponse.json(
       { error: 'Invalid signature' },
       { status: 400 }
