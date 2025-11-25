@@ -393,22 +393,52 @@ async function processCheckoutSession(
 
       closestGyms = gymsWithDistance.slice(0, 3)
       console.log('✅ Selected top 3 gyms for email')
+      console.log('📋 Closest gyms:', closestGyms.map((g: any) => `${g.name} (${g.id})`).join(', '))
     } else {
-      closestGyms = gymsResult.slice(0, 3)
-      console.log('⚠️ Using first 3 gyms (no user coordinates available)')
+      if (gymsResult.length > 0) {
+        closestGyms = gymsResult.slice(0, 3)
+        console.log('⚠️ Using first 3 gyms (no user coordinates available)')
+        console.log('📋 Selected gyms:', closestGyms.map((g: any) => `${g.name} (${g.id})`).join(', '))
+      } else {
+        console.error('❌ No gyms found in database!')
+      }
     }
+    
+    console.log('📊 Final closestGyms array length:', closestGyms.length)
 
     // Send welcome email if SendGrid is configured
+    console.log('📧 Preparing to send email...')
+    console.log('  - SendGrid API Key configured:', !!process.env.SENDGRID_API_KEY)
+    console.log('  - User email:', userEmail)
+    console.log('  - Closest gyms count:', closestGyms.length)
+    
     if (process.env.SENDGRID_API_KEY && userEmail) {
-      await sendWelcomeEmail(
-        request,
-        userEmail,
-        firstName,
-        tier,
-        closestGyms
-      )
+      if (closestGyms.length > 0) {
+        console.log('📧 Sending welcome email with', closestGyms.length, 'gyms')
+        try {
+          await sendWelcomeEmail(
+            request,
+            userEmail,
+            firstName,
+            tier,
+            closestGyms
+          )
+          console.log('✅ Email sending completed')
+        } catch (emailError: any) {
+          console.error('❌ Error in sendWelcomeEmail:', emailError?.message)
+          console.error('❌ Stack:', emailError?.stack)
+          // Don't throw - continue processing
+        }
+      } else {
+        console.log('⚠️ Skipping email - no gyms available to include')
+      }
     } else {
-      console.log('⚠️ Skipping email - SendGrid not configured or no email')
+      if (!process.env.SENDGRID_API_KEY) {
+        console.log('⚠️ Skipping email - SENDGRID_API_KEY not configured')
+      }
+      if (!userEmail) {
+        console.log('⚠️ Skipping email - no user email available')
+      }
     }
 
     console.log('🏁 PROCESSING COMPLETE')
@@ -426,10 +456,17 @@ async function sendWelcomeEmail(
   tier: string,
   closestGyms: any[]
 ) {
+  console.log('📧 ========== SEND WELCOME EMAIL START ==========')
   console.log('📧 EMAIL DETAILS:')
   console.log('  To:', userEmail)
   console.log('  First Name:', firstName)
   console.log('  Membership:', tier)
+  console.log('  Number of gyms to include:', closestGyms.length)
+
+  if (!closestGyms || closestGyms.length === 0) {
+    console.error('❌ No gyms provided to sendWelcomeEmail')
+    return
+  }
 
   const membershipName = tier.charAt(0).toUpperCase() + tier.slice(1)
 
@@ -443,6 +480,7 @@ async function sendWelcomeEmail(
     },
   }
 
+  console.log('📧 Building gym data for email...')
   // Add gym data
   for (let i = 0; i < 3; i++) {
     const gymIndex = i + 1
@@ -484,7 +522,22 @@ async function sendWelcomeEmail(
   // Send email
   console.log('📧 FULL EMAIL DATA TO SENDGRID:')
   console.log(JSON.stringify(emailData, null, 2))
+  
+  // Validate email data before sending
+  if (!emailData.to) {
+    console.error('❌ Email data missing recipient (to)')
+    return
+  }
+  if (!emailData.from) {
+    console.error('❌ Email data missing sender (from)')
+    return
+  }
+  if (!emailData.templateId) {
+    console.error('❌ Email data missing template ID')
+    return
+  }
 
+  console.log('📧 Attempting to send email via SendGrid...')
   try {
     const sendResult = await sgMail.send(emailData)
     console.log('✅✅✅ EMAIL SENT SUCCESSFULLY! ✅✅✅')
@@ -492,10 +545,16 @@ async function sendWelcomeEmail(
     console.log('📧 SendGrid message ID:', sendResult[0]?.headers?.['x-message-id'])
   } catch (emailError: any) {
     console.error('❌❌❌ EMAIL SEND FAILED! ❌❌❌')
-    console.error('❌ Error:', emailError.message)
+    console.error('❌ Error message:', emailError.message)
+    console.error('❌ Error code:', emailError.code)
     if (emailError.response) {
-      console.error('❌ SendGrid error:', JSON.stringify(emailError.response.body, null, 2))
+      console.error('❌ SendGrid response status:', emailError.response.statusCode)
+      console.error('❌ SendGrid error body:', JSON.stringify(emailError.response.body, null, 2))
+    }
+    if (emailError.stack) {
+      console.error('❌ Error stack:', emailError.stack)
     }
     // Don't throw - email failure shouldn't break the webhook
   }
+  console.log('📧 ========== SEND WELCOME EMAIL END ==========')
 }
