@@ -99,8 +99,37 @@ async function handleOtherEvents(event: Stripe.Event) {
       console.log('🔄 Processing subscription.updated event')
       console.log('📋 Subscription ID:', subscription.id)
       console.log('📋 Subscription status:', subscription.status)
+      console.log('📋 Customer ID:', subscription.customer)
       console.log('📋 current_period_end:', subscription.current_period_end)
       console.log('📋 Subscription items count:', subscription.items.data.length)
+
+      // Get customer to find auth0_id
+      let auth0Id: string | null = null
+      try {
+        const customer = await stripe.customers.retrieve(subscription.customer as string)
+        if (!customer.deleted) {
+          const customerObj = customer as Stripe.Customer
+          auth0Id = customerObj.metadata?.auth0_id || customerObj.metadata?.user_id || null
+          console.log('📋 Found auth0_id from customer metadata:', auth0Id)
+        }
+      } catch (customerError: any) {
+        console.error('❌ Error retrieving customer:', customerError.message)
+      }
+
+      // If we have auth0_id and subscription is active, cancel other active subscriptions for this user
+      if (auth0Id && subscription.status === 'active') {
+        const trimmedAuth0Id = auth0Id.trim()
+        console.log('🔄 Canceling other active subscriptions for user:', trimmedAuth0Id)
+        const canceledOthers = await sql`
+          UPDATE subscriptions 
+          SET status = 'canceled', updated_at = NOW()
+          WHERE user_id = ${trimmedAuth0Id} 
+          AND status = 'active'
+          AND stripe_subscription_id != ${subscription.id}
+          RETURNING id
+        `
+        console.log(`✅ Canceled ${canceledOthers.length} other active subscription(s) for user`)
+      }
 
       // Get subscription details from the first item (price/product)
       let tier = 'standard'
@@ -169,34 +198,75 @@ async function handleOtherEvents(event: Stripe.Event) {
         ? 'canceled' 
         : subscription.status
 
-      // Update subscription with all available information
-      if (dateString) {
+      // Check if subscription exists in database
+      const existingSub = await sql`
+        SELECT id, user_id FROM subscriptions
+        WHERE stripe_subscription_id = ${subscription.id}
+        LIMIT 1
+      `
+
+      if (existingSub.length > 0) {
+        // Update existing subscription
+        if (dateString) {
+          await sql`
+            UPDATE subscriptions
+            SET 
+              status = ${dbStatus},
+              tier = ${tier},
+              monthly_limit = ${monthlyLimit},
+              guest_passes_limit = ${guestPassesLimit},
+              price = ${price},
+              next_billing_date = ${dateString},
+              updated_at = NOW()
+            WHERE stripe_subscription_id = ${subscription.id}
+          `
+          console.log('✅ Updated subscription in database (with all fields)')
+        } else {
+          await sql`
+            UPDATE subscriptions
+            SET 
+              status = ${dbStatus},
+              tier = ${tier},
+              monthly_limit = ${monthlyLimit},
+              guest_passes_limit = ${guestPassesLimit},
+              price = ${price},
+              updated_at = NOW()
+            WHERE stripe_subscription_id = ${subscription.id}
+          `
+          console.log('✅ Updated subscription in database (without date)')
+        }
+      } else if (auth0Id && subscription.status === 'active') {
+        // Subscription doesn't exist in DB but is active - create it
+        // This can happen if webhook order is wrong or subscription was created outside normal flow
+        console.log('⚠️ Subscription not found in DB, creating new record...')
+        const startDate = new Date(subscription.current_period_start * 1000)
+        const nextBillingDate = subscription.current_period_end 
+          ? new Date(subscription.current_period_end * 1000)
+          : new Date()
+        
         await sql`
-          UPDATE subscriptions
-          SET 
-            status = ${dbStatus},
-            tier = ${tier},
-            monthly_limit = ${monthlyLimit},
-            guest_passes_limit = ${guestPassesLimit},
-            price = ${price},
-            next_billing_date = ${dateString},
-            updated_at = NOW()
-          WHERE stripe_subscription_id = ${subscription.id}
+          INSERT INTO subscriptions (
+            user_id, tier, monthly_limit, price, start_date, next_billing_date,
+            visits_used, status, stripe_subscription_id, stripe_customer_id,
+            guest_passes_limit, guest_passes_used, created_at, updated_at
+          ) VALUES (
+            ${auth0Id.trim()},
+            ${tier},
+            ${monthlyLimit},
+            ${price},
+            ${startDate.toISOString().split('T')[0]},
+            ${nextBillingDate.toISOString().split('T')[0]},
+            0,
+            'active',
+            ${subscription.id},
+            ${subscription.customer as string},
+            ${guestPassesLimit},
+            0,
+            NOW(),
+            NOW()
+          )
         `
-        console.log('✅ Updated subscription in database (with all fields)')
-      } else {
-        await sql`
-          UPDATE subscriptions
-          SET 
-            status = ${dbStatus},
-            tier = ${tier},
-            monthly_limit = ${monthlyLimit},
-            guest_passes_limit = ${guestPassesLimit},
-            price = ${price},
-            updated_at = NOW()
-          WHERE stripe_subscription_id = ${subscription.id}
-        `
-        console.log('✅ Updated subscription in database (without date)')
+        console.log('✅ Created missing subscription in database')
       }
       
       if (dbStatus === 'canceled') {
@@ -270,8 +340,16 @@ async function processCheckoutSession(
     // Get auth0_id from customer metadata
     const auth0Id = customerObj.metadata?.auth0_id || customerObj.metadata?.user_id || session.metadata?.userId
 
+    console.log('🔍 Looking for auth0_id in:')
+    console.log('  - customer.metadata.auth0_id:', customerObj.metadata?.auth0_id)
+    console.log('  - customer.metadata.user_id:', customerObj.metadata?.user_id)
+    console.log('  - session.metadata.userId:', session.metadata?.userId)
+    console.log('✅ Found auth0_id:', auth0Id)
+
     if (!auth0Id) {
       console.error('❌ No auth0_id found in customer metadata')
+      console.error('📋 Customer metadata:', JSON.stringify(customerObj.metadata, null, 2))
+      console.error('📋 Session metadata:', JSON.stringify(session.metadata, null, 2))
       return
     }
 
@@ -284,13 +362,17 @@ async function processCheckoutSession(
     console.log('✅ Stored Stripe customer ID in app_users')
 
     // Cancel any existing active subscriptions
-    await sql`
+    const canceledCount = await sql`
       UPDATE subscriptions 
-      SET status = 'cancelled' 
-      WHERE user_id = ${auth0Id} 
+      SET status = 'canceled', updated_at = NOW()
+      WHERE user_id = ${auth0Id.trim()} 
       AND status = 'active'
+      RETURNING id
     `
-    console.log('✅ Cancelled existing subscriptions')
+    console.log(`✅ Canceled ${canceledCount.length} existing subscription(s)`)
+    if (canceledCount.length > 0) {
+      console.log('📋 Canceled subscription IDs:', canceledCount.map((s: any) => s.id).join(', '))
+    }
 
     // Get subscription details from metadata
     const monthlyLimit = parseInt(session.metadata?.monthly_limit || '8', 10)
@@ -325,30 +407,88 @@ async function processCheckoutSession(
 
     // Create new subscription in database
     try {
-      const insertResult = await sql`
-        INSERT INTO subscriptions (
-          user_id, tier, monthly_limit, price, start_date, next_billing_date,
-          visits_used, status, stripe_subscription_id, stripe_customer_id,
-          guest_passes_limit, guest_passes_used, created_at, updated_at
-        ) VALUES (
-          ${auth0Id},
-          ${tier},
-          ${monthlyLimit},
-          ${price},
-          ${startDate.toISOString().split('T')[0]},
-          ${nextBillingDate.toISOString().split('T')[0]},
-          0,
-          'active',
-          ${subscriptionId || null},
-          ${session.customer as string},
-          ${guestPassesLimit},
-          0,
-          NOW(),
-          NOW()
-        )
-        RETURNING id
+      // First verify the subscription doesn't already exist
+      const existingCheck = await sql`
+        SELECT id FROM subscriptions
+        WHERE stripe_subscription_id = ${subscriptionId || ''}
+        LIMIT 1
       `
-      console.log('✅ Created subscription in database with ID:', insertResult[0]?.id)
+      
+      if (existingCheck.length > 0) {
+        console.log('⚠️ Subscription already exists in database, updating instead...')
+        await sql`
+          UPDATE subscriptions
+          SET 
+            user_id = ${auth0Id.trim()},
+            tier = ${tier},
+            monthly_limit = ${monthlyLimit},
+            price = ${price},
+            start_date = ${startDate.toISOString().split('T')[0]},
+            next_billing_date = ${nextBillingDate.toISOString().split('T')[0]},
+            status = 'active',
+            stripe_customer_id = ${session.customer as string},
+            guest_passes_limit = ${guestPassesLimit},
+            updated_at = NOW()
+          WHERE stripe_subscription_id = ${subscriptionId || ''}
+        `
+        console.log('✅ Updated existing subscription in database')
+        
+        // Verify the update
+        const verifyUpdate = await sql`
+          SELECT id, user_id, status, stripe_subscription_id 
+          FROM subscriptions 
+          WHERE stripe_subscription_id = ${subscriptionId || ''}
+          LIMIT 1
+        `
+        console.log('🔍 Updated subscription verification:', JSON.stringify(verifyUpdate[0], null, 2))
+      } else {
+        const insertResult = await sql`
+          INSERT INTO subscriptions (
+            user_id, tier, monthly_limit, price, start_date, next_billing_date,
+            visits_used, status, stripe_subscription_id, stripe_customer_id,
+            guest_passes_limit, guest_passes_used, created_at, updated_at
+          ) VALUES (
+            ${auth0Id.trim()},
+            ${tier},
+            ${monthlyLimit},
+            ${price},
+            ${startDate.toISOString().split('T')[0]},
+            ${nextBillingDate.toISOString().split('T')[0]},
+            0,
+            'active',
+            ${subscriptionId || null},
+            ${session.customer as string},
+            ${guestPassesLimit},
+            0,
+            NOW(),
+            NOW()
+          )
+          RETURNING id
+        `
+        console.log('✅ Created subscription in database with ID:', insertResult[0]?.id)
+        
+        // Verify the subscription was created correctly
+        const verifyResult = await sql`
+          SELECT id, user_id, status, stripe_subscription_id 
+          FROM subscriptions 
+          WHERE id = ${insertResult[0]?.id}
+          LIMIT 1
+        `
+        console.log('🔍 Verification query result:', JSON.stringify(verifyResult[0], null, 2))
+        
+        // Also verify by user_id
+        const verifyByUserId = await sql`
+          SELECT id, user_id, status, stripe_subscription_id 
+          FROM subscriptions 
+          WHERE user_id = ${auth0Id.trim()}
+          AND status = 'active'
+          ORDER BY created_at DESC
+        `
+        console.log('🔍 Active subscriptions for user:', verifyByUserId.length)
+        verifyByUserId.forEach((sub: any, idx: number) => {
+          console.log(`  ${idx + 1}. ID: ${sub.id}, status: ${sub.status}, stripe_id: ${sub.stripe_subscription_id}, user_id: ${sub.user_id}`)
+        })
+      }
     } catch (insertError: any) {
       console.error('❌ Failed to create subscription in database:')
       console.error('  Error message:', insertError?.message)
