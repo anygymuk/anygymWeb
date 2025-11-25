@@ -17,7 +17,7 @@ package = "@netlify/plugin-nextjs"
   [plugins.inputs]
 
 [build]
-publish = "/opt/build/repo/.next"
+publish = ".next"
 publishOrigin = "config"
 commandOrigin = "config"
 command = "npm run build"
