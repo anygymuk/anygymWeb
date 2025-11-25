@@ -94,7 +94,7 @@ export async function getOrCreateAppUser(
 
   // Try to find existing user
   // Use COALESCE to handle cases where columns might not exist yet
-  let result: UserRow[] = []
+  let result: any[] = [];
   try {
     result = await sql`
       SELECT 
