@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { sql } from '@/lib/db'
+import { Gym } from '@/lib/types'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -18,58 +19,107 @@ export async function GET(
 
     const gymId = parseInt(params.id)
 
-    // Fetch gym with chain information including terms and health statement
-    const result = await sql`
-      SELECT 
-        g.*,
-        json_build_object(
-          'id', gc.id,
-          'name', gc.name,
-          'logo_url', gc.logo_url,
-          'brand_color', gc.brand_color,
-          'website', gc.website,
-          'description', gc.description,
-          'terms', gc.terms,
-          'health_statement', gc.health_statement,
-          'terms_url', gc.terms_url,
-          'health_statement_url', gc.health_statement_url,
-          'use_terms_url', gc.use_terms_url,
-          'use_health_statement_url', gc.use_health_statement_url
-        ) as chain
-      FROM gyms g
-      LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-      WHERE g.id = ${gymId}
-    `
+    // Fetch gym from external API using specific endpoint
+    const response = await fetch(`https://api.any-gym.com/gyms/${gymId}`, {
+      next: { revalidate: 3600 } // Cache for 1 hour
+    })
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return NextResponse.json(
+          { error: 'Gym not found' },
+          { status: 404 }
+        )
+      }
+      throw new Error(`Failed to fetch gym: ${response.statusText}`)
+    }
+    
+    const gymData = await response.json()
 
-    if (result.length === 0) {
-      return NextResponse.json(
-        { error: 'Gym not found' },
-        { status: 404 }
-      )
+    // Map API response to Gym type
+    const gym: Gym = {
+      id: gymData.id,
+      name: gymData.name,
+      address: gymData.address || '',
+      city: gymData.city || '',
+      postcode: gymData.postcode || '',
+      phone: gymData.phone || undefined,
+      latitude: gymData.latitude ? parseFloat(gymData.latitude) : undefined,
+      longitude: gymData.longitude ? parseFloat(gymData.longitude) : undefined,
+      gym_chain_id: gymData.gym_chain_id || undefined,
+      required_tier: gymData.required_tier || 'standard',
+      amenities: gymData.amenities || [],
+      opening_hours: gymData.opening_hours || {},
+      image_url: gymData.image_url || undefined,
+      rating: undefined,
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
     }
 
-    const row = result[0]
-    const gym = {
-      id: row.id,
-      name: row.name,
-      address: row.address,
-      city: row.city,
-      postcode: row.postcode,
-      phone: row.phone,
-      latitude: row.latitude ? parseFloat(row.latitude) : undefined,
-      longitude: row.longitude ? parseFloat(row.longitude) : undefined,
-      gym_chain_id: row.gym_chain_id,
-      required_tier: row.required_tier,
-      amenities: row.amenities,
-      opening_hours: row.opening_hours,
-      image_url: row.image_url,
-      rating: row.rating ? parseFloat(row.rating) : undefined,
-      status: row.status,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
+    // Use gym_chain from API response if available, otherwise fetch from database
+    let gym_chain = null
+    
+    // Check if API response includes gym_chain object
+    if (gymData.gym_chain) {
+      gym_chain = gymData.gym_chain
+    } else if (gym.gym_chain_id) {
+      // Fallback to database if gym_chain not in API response
+      try {
+        const chainResult = await sql`
+          SELECT 
+            id,
+            name,
+            logo_url,
+            brand_color,
+            website,
+            description,
+            terms,
+            health_statement,
+            terms_url,
+            health_statement_url,
+            use_terms_url,
+            use_health_statement_url
+          FROM gym_chains
+          WHERE id = ${gym.gym_chain_id}
+        `
+        
+        if (chainResult.length > 0) {
+          const chainRow = chainResult[0]
+          gym_chain = {
+            id: chainRow.id,
+            name: chainRow.name,
+            logo_url: chainRow.logo_url || undefined,
+            brand_color: chainRow.brand_color,
+            website: chainRow.website,
+            description: chainRow.description,
+            terms: chainRow.terms,
+            health_statement: chainRow.health_statement,
+            terms_url: chainRow.terms_url,
+            health_statement_url: chainRow.health_statement_url,
+            use_terms_url: chainRow.use_terms_url,
+            use_health_statement_url: chainRow.use_health_statement_url,
+          }
+        } else {
+          // Fallback to basic chain info from API
+          gym_chain = {
+            id: gymData.gym_chain_id,
+            name: gymData.gym_chain_name || 'Unknown Chain',
+            logo_url: gymData.gym_chain_logo || undefined,
+          }
+        }
+      } catch (chainError) {
+        console.error('Error fetching chain from database:', chainError)
+        // Fallback to basic chain info from API
+        gym_chain = {
+          id: gymData.gym_chain_id,
+          name: gymData.gym_chain_name || 'Unknown Chain',
+          logo_url: gymData.gym_chain_logo || undefined,
+        }
+      }
     }
 
-    return NextResponse.json({ gym, chain: row.chain })
+    return NextResponse.json({ gym, gym_chain })
   } catch (error) {
     console.error('Error fetching gym:', error)
     return NextResponse.json(

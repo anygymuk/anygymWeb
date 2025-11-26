@@ -154,8 +154,8 @@ export default function PassesView({
           const response = await fetch(`/api/gyms/${gymId}`)
           if (response.ok) {
             const data = await response.json()
-            if (data.chain) {
-              const chainData = data.chain
+            if (data.gym_chain) {
+              const chainData = data.gym_chain
               const hasTerms = 
                 (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '') || 
                 (chainData.use_terms_url && chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '')

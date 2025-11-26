@@ -64,7 +64,7 @@ export default function GymMapView({ initialGyms, chains, hasSubscription = fals
       const data = await response.json()
       if (data.gym) {
         setSelectedGym(data.gym)
-        setSelectedGymChain(data.chain)
+        setSelectedGymChain(data.gym_chain)
       }
     } catch (error) {
       console.error('Error fetching gym details:', error)

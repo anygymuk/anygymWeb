@@ -196,81 +196,48 @@ async function getUserSubscription(appUserId: number | null, auth0Id?: string): 
   try {
     console.log('[getUserSubscription] Looking up subscription for appUserId:', appUserId, 'auth0Id:', auth0Id)
     
-    // Try both numeric ID and Auth0 ID (subscriptions might use either)
-    // Based on the Deno function, subscriptions use auth0_id as user_id
-    let result
-    if (auth0Id) {
-      // First try with Auth0 ID (most likely)
-      result = await sql`
-        SELECT * FROM subscriptions 
-        WHERE user_id = ${auth0Id.trim()}
-        AND status = 'active'
-        ORDER BY created_at DESC
-        LIMIT 1
-      `
-      console.log('[getUserSubscription] Query with auth0Id result:', result.length)
-      
-      // If not found and we have appUserId, try numeric ID
-      if (result.length === 0 && appUserId && appUserId > 0) {
-        result = await sql`
-          SELECT * FROM subscriptions 
-          WHERE user_id::text = ${appUserId}::text
-          AND status = 'active'
-          ORDER BY created_at DESC
-          LIMIT 1
-        `
-        console.log('[getUserSubscription] Query with appUserId result:', result.length)
-      }
-    } else if (appUserId && appUserId > 0) {
-      result = await sql`
-        SELECT * FROM subscriptions 
-        WHERE user_id::text = ${appUserId}::text
-        AND status = 'active'
-        ORDER BY created_at DESC
-        LIMIT 1
-      `
-      console.log('[getUserSubscription] Query with appUserId only result:', result.length)
-    } else {
-      console.log('[getUserSubscription] No appUserId or auth0Id provided')
+    if (!auth0Id) {
+      console.log('[getUserSubscription] No auth0Id provided')
       return null
     }
-    
-    if (result.length === 0) {
-      console.log('[getUserSubscription] No subscription found')
-      return null
-    }
-    
-    const row = result[0]
-    
-    // Ensure monthly_limit is a number
-    const monthlyLimit = row.monthly_limit != null 
-      ? Number(row.monthly_limit) 
-      : 0
-    
-    console.log('[getUserSubscription] Raw subscription data:', {
-      id: row.id,
-      tier: row.tier,
-      monthly_limit_raw: row.monthly_limit,
-      monthly_limit_type: typeof row.monthly_limit,
-      monthly_limit_parsed: monthlyLimit,
+
+    // Fetch subscription from external API
+    const response = await fetch('https://api.any-gym.com/user/subscription', {
+      headers: {
+        'auth0_id': auth0Id.trim(),
+      },
+      next: { revalidate: 60 } // Cache for 1 minute
     })
     
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log('[getUserSubscription] No subscription found (404)')
+        return null
+      }
+      throw new Error(`Failed to fetch subscription: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    console.log('[getUserSubscription] API response:', data)
+    
+    // Map API response to Subscription type
+    // Adjust field mapping based on actual API response structure
     return {
-      id: row.id,
-      userId: row.user_id,
-      tier: row.tier,
-      monthlyLimit: monthlyLimit,
-      visitsUsed: row.visits_used ? Number(row.visits_used) : 0,
-      price: parseFloat(row.price),
-      startDate: new Date(row.start_date),
-      nextBillingDate: new Date(row.next_billing_date),
-      status: row.status,
-      stripeSubscriptionId: row.stripe_subscription_id,
-      stripeCustomerId: row.stripe_customer_id,
-      guestPassesLimit: row.guest_passes_limit ? Number(row.guest_passes_limit) : 0,
-      guestPassesUsed: row.guest_passes_used ? Number(row.guest_passes_used) : 0,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
+      id: data.id || 0,
+      userId: data.user_id || auth0Id,
+      tier: data.tier || 'standard',
+      monthlyLimit: data.monthly_limit != null ? Number(data.monthly_limit) : 0,
+      visitsUsed: data.visits_used != null ? Number(data.visits_used) : 0,
+      price: data.price != null ? parseFloat(data.price) : 0,
+      startDate: data.start_date ? new Date(data.start_date) : new Date(),
+      nextBillingDate: data.next_billing_date ? new Date(data.next_billing_date) : new Date(),
+      status: data.status || 'active',
+      stripeSubscriptionId: data.stripe_subscription_id || undefined,
+      stripeCustomerId: data.stripe_customer_id || undefined,
+      guestPassesLimit: data.guest_passes_limit != null ? Number(data.guest_passes_limit) : 0,
+      guestPassesUsed: data.guest_passes_used != null ? Number(data.guest_passes_used) : 0,
+      createdAt: data.created_at ? new Date(data.created_at) : new Date(),
+      updatedAt: data.updated_at ? new Date(data.updated_at) : new Date(),
     } as Subscription
   } catch (error) {
     console.error('Error fetching subscription:', error)

@@ -46,32 +46,38 @@ async function getUserSubscription(userId: string): Promise<Subscription | null>
 
 async function getAllGyms(): Promise<Gym[]> {
   try {
-    const result = await sql`
-      SELECT * FROM gyms 
-      WHERE latitude IS NOT NULL 
-        AND longitude IS NOT NULL
-        AND status IS DISTINCT FROM 'inactive'
-      ORDER BY name
-    `
-    return result.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      address: row.address,
-      city: row.city,
-      postcode: row.postcode,
-      phone: row.phone,
-      latitude: row.latitude ? parseFloat(row.latitude) : undefined,
-      longitude: row.longitude ? parseFloat(row.longitude) : undefined,
-      gym_chain_id: row.gym_chain_id,
-      required_tier: row.required_tier,
-      amenities: row.amenities,
-      opening_hours: row.opening_hours,
-      image_url: row.image_url,
-      rating: row.rating ? parseFloat(row.rating) : undefined,
-      status: row.status,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-    })) as Gym[]
+    const response = await fetch('https://api.any-gym.com/gyms', {
+      next: { revalidate: 3600 } // Cache for 1 hour
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch gyms: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Map API response to Gym type
+    return data
+      .filter((gym: any) => gym.latitude != null && gym.longitude != null)
+      .map((gym: any) => ({
+        id: gym.id,
+        name: gym.name,
+        address: gym.address || '',
+        city: gym.city || '',
+        postcode: gym.postcode || '',
+        phone: gym.phone || undefined,
+        latitude: gym.latitude ? parseFloat(gym.latitude) : undefined,
+        longitude: gym.longitude ? parseFloat(gym.longitude) : undefined,
+        gym_chain_id: gym.gym_chain_id || undefined,
+        required_tier: gym.required_tier || 'standard',
+        amenities: gym.amenities || [],
+        opening_hours: gym.opening_hours || {},
+        image_url: gym.image_url || undefined,
+        rating: undefined, // Not provided by API
+        status: 'active', // Default to active
+        createdAt: new Date(), // Default to current date
+        updatedAt: new Date(), // Default to current date
+      })) as Gym[]
   } catch (error) {
     console.error('Error fetching gyms:', error)
     return []

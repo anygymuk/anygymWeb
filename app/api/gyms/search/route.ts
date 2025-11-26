@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { sql } from '@/lib/db'
+import { Gym } from '@/lib/types'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -18,88 +18,63 @@ export async function GET(request: NextRequest) {
     const tier = searchParams.get('tier')
     const chainId = searchParams.get('chain')
 
-    let result
+    // Fetch all gyms from external API
+    const response = await fetch('https://api.any-gym.com/gyms', {
+      next: { revalidate: 3600 } // Cache for 1 hour
+    })
     
-    // Base query with filters
-    if (searchQuery && tier && tier !== 'All Tiers' && chainId && chainId !== 'All Chains') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND (name ILIKE ${'%' + searchQuery + '%'} OR city ILIKE ${'%' + searchQuery + '%'} OR postcode ILIKE ${'%' + searchQuery + '%'})
-          AND required_tier = ${tier}
-          AND gym_chain_id = ${parseInt(chainId)}
-        ORDER BY name
-      `
-    } else if (searchQuery && tier && tier !== 'All Tiers') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND (name ILIKE ${'%' + searchQuery + '%'} OR city ILIKE ${'%' + searchQuery + '%'} OR postcode ILIKE ${'%' + searchQuery + '%'})
-          AND required_tier = ${tier}
-        ORDER BY name
-      `
-    } else if (searchQuery && chainId && chainId !== 'All Chains') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND (name ILIKE ${'%' + searchQuery + '%'} OR city ILIKE ${'%' + searchQuery + '%'} OR postcode ILIKE ${'%' + searchQuery + '%'})
-          AND gym_chain_id = ${parseInt(chainId)}
-        ORDER BY name
-      `
-    } else if (tier && tier !== 'All Tiers' && chainId && chainId !== 'All Chains') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND required_tier = ${tier}
-          AND gym_chain_id = ${parseInt(chainId)}
-        ORDER BY name
-      `
-    } else if (searchQuery) {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND (name ILIKE ${'%' + searchQuery + '%'} OR city ILIKE ${'%' + searchQuery + '%'} OR postcode ILIKE ${'%' + searchQuery + '%'})
-        ORDER BY name
-      `
-    } else if (tier && tier !== 'All Tiers') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND required_tier = ${tier}
-        ORDER BY name
-      `
-    } else if (chainId && chainId !== 'All Chains') {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-          AND gym_chain_id = ${parseInt(chainId)}
-        ORDER BY name
-      `
-    } else {
-      result = await sql`
-        SELECT * FROM gyms 
-        WHERE latitude IS NOT NULL 
-          AND longitude IS NOT NULL
-          AND status IS DISTINCT FROM 'inactive'
-        ORDER BY name
-      `
+    if (!response.ok) {
+      throw new Error(`Failed to fetch gyms: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Map API response to Gym type and filter
+    let gyms: Gym[] = data
+      .filter((gym: any) => gym.latitude != null && gym.longitude != null)
+      .map((gym: any) => ({
+        id: gym.id,
+        name: gym.name,
+        address: gym.address || '',
+        city: gym.city || '',
+        postcode: gym.postcode || '',
+        phone: gym.phone || undefined,
+        latitude: gym.latitude ? parseFloat(gym.latitude) : undefined,
+        longitude: gym.longitude ? parseFloat(gym.longitude) : undefined,
+        gym_chain_id: gym.gym_chain_id || undefined,
+        required_tier: gym.required_tier || 'standard',
+        amenities: gym.amenities || [],
+        opening_hours: gym.opening_hours || {},
+        image_url: gym.image_url || undefined,
+        rating: undefined,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })) as Gym[]
+
+    // Apply filters client-side
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      gyms = gyms.filter((gym) => 
+        gym.name.toLowerCase().includes(query) ||
+        gym.city.toLowerCase().includes(query) ||
+        gym.postcode.toLowerCase().includes(query)
+      )
     }
 
-    return NextResponse.json({ gyms: result })
+    if (tier && tier !== 'All Tiers') {
+      gyms = gyms.filter((gym) => gym.required_tier === tier)
+    }
+
+    if (chainId && chainId !== 'All Chains') {
+      const chainIdNum = parseInt(chainId)
+      gyms = gyms.filter((gym) => gym.gym_chain_id === chainIdNum)
+    }
+
+    // Sort by name
+    gyms.sort((a, b) => a.name.localeCompare(b.name))
+
+    return NextResponse.json({ gyms })
   } catch (error) {
     console.error('Search error:', error)
     return NextResponse.json(
