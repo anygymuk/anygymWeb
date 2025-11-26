@@ -40,12 +40,15 @@ export default function GeneratePassForm({ gymId, chain }: GeneratePassFormProps
       return
     }
     
+    // Check if terms exist - either as URL or as markdown content
     const hasTerms = 
-      (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '') || 
-      (chainData.use_terms_url && chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '')
+      (chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '') ||
+      (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '')
+    
+    // Check if health statement exists - either as URL or as markdown content
     const hasHealthStatement =
-      (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '') ||
-      (chainData.use_health_statement_url && chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '')
+      (chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '') ||
+      (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '')
 
     if (hasTerms || hasHealthStatement) {
       setShowTermsModal(true)

@@ -58,16 +58,26 @@ export default function GymMapView({ initialGyms, chains, hasSubscription = fals
   const handleGymClick = async (gym: Gym) => {
     setSelectedGym(gym)
     setLoadingGymDetails(true)
+    setSelectedGymChain(null) // Reset chain data
     
     try {
       const response = await fetch(`/api/gyms/${gym.id}`)
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to fetch gym details' }))
+        console.error('Error fetching gym details:', response.status, errorData)
+        // Keep the gym data we already have, just don't update it
+        return
+      }
+      
       const data = await response.json()
       if (data.gym) {
         setSelectedGym(data.gym)
-        setSelectedGymChain(data.gym_chain)
+        setSelectedGymChain(data.gym_chain || null)
       }
     } catch (error) {
       console.error('Error fetching gym details:', error)
+      // Keep the gym data we already have, just don't update it
     } finally {
       setLoadingGymDetails(false)
     }

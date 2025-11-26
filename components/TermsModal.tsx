@@ -9,9 +9,10 @@ interface TermsModalProps {
 }
 
 export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProps) {
-  const hasTerms = chain?.terms || (chain?.use_terms_url && chain?.terms_url)
-  const hasHealthStatement =
-    chain?.health_statement || (chain?.use_health_statement_url && chain?.health_statement_url)
+  // Check if terms exist - either as URL or as markdown content
+  const hasTerms = chain?.terms_url || chain?.terms
+  // Check if health statement exists - either as URL or as markdown content
+  const hasHealthStatement = chain?.health_statement_url || chain?.health_statement
 
   return (
     <div
@@ -42,8 +43,8 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                   Terms & Conditions
                 </h3>
               </div>
-              {chain?.use_terms_url && chain?.terms_url ? (
-                // Show only URL link when use_terms_url is true
+              {chain?.terms_url ? (
+                // Show URL link when terms_url is provided
                 <div className="mb-3">
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-3">
                     <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -72,7 +73,7 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                   </div>
                 </div>
               ) : chain?.terms ? (
-                // Show inline terms text only when use_terms_url is false/not set
+                // Show inline terms markdown when terms is provided
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto mb-3">
                   <div className="text-sm text-gray-700 dark:text-gray-300">
                     <ReactMarkdown
@@ -114,8 +115,8 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                   Health Statement
                 </h3>
               </div>
-              {chain?.use_health_statement_url && chain?.health_statement_url ? (
-                // Show only URL link when use_health_statement_url is true
+              {chain?.health_statement_url ? (
+                // Show URL link when health_statement_url is provided
                 <div className="mb-3">
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-3">
                     <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -144,7 +145,7 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
                   </div>
                 </div>
               ) : chain?.health_statement ? (
-                // Show inline health statement text only when use_health_statement_url is false/not set
+                // Show inline health statement markdown when health_statement is provided
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-48 overflow-y-auto mb-3">
                   <div className="text-sm text-gray-700 dark:text-gray-300">
                     <ReactMarkdown

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Gym } from '@/lib/types'
@@ -24,42 +24,106 @@ export default function GymDetailsPanel({
   const [showTermsModal, setShowTermsModal] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chainData, setChainData] = useState<any>(chain) // Store chain data in state
   const router = useRouter()
+
+  // Sync chain prop with state when it changes
+  useEffect(() => {
+    if (chain) {
+      setChainData(chain)
+    }
+  }, [chain])
 
   // Helper to parse chain data
   const getChainData = () => {
-    if (!chain) return null
-    if (typeof chain === 'string') {
+    // Use state chainData if available, otherwise fall back to prop
+    const dataToUse = chainData || chain
+    if (!dataToUse) return null
+    if (typeof dataToUse === 'string') {
       try {
-        return JSON.parse(chain)
+        return JSON.parse(dataToUse)
       } catch (e) {
         console.error('Error parsing chain JSON:', e)
         return null
       }
     }
-    return chain
+    return dataToUse
   }
 
-  const handleGeneratePassClick = () => {
-    const chainData = getChainData()
+  const handleGeneratePassClick = async () => {
+    setLoading(true)
+    setError(null)
+    
+    let currentChainData = getChainData()
+    
+    // If no chain data, try to fetch it
+    if (!currentChainData && gym.id) {
+      try {
+        console.log('[GymDetailsPanel] Fetching chain data for gym:', gym.id)
+        const response = await fetch(`/api/gyms/${gym.id}`)
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Failed to fetch gym details' }))
+          console.error('[GymDetailsPanel] Failed to fetch gym details:', response.status, errorData)
+          setLoading(false)
+          // If we can't fetch chain data, we can't show terms modal, so generate directly
+          // But first check if we should show an error
+          if (response.status === 404) {
+            setError('Gym not found. Please try again.')
+            return
+          }
+          // For other errors, still try to generate (maybe chain data isn't critical)
+          handleGeneratePass()
+          return
+        }
+        
+        const data = await response.json()
+        console.log('[GymDetailsPanel] Gym details response:', data)
+        
+        if (data.gym_chain) {
+          currentChainData = data.gym_chain
+          setChainData(data.gym_chain) // Store in state for future use
+          console.log('[GymDetailsPanel] Chain data loaded:', currentChainData)
+        } else {
+          console.log('[GymDetailsPanel] No gym_chain in response')
+        }
+      } catch (error) {
+        console.error('[GymDetailsPanel] Error fetching chain data:', error)
+        setLoading(false)
+        setError('Failed to load gym details. Please try again.')
+        return
+      }
+    }
+    
+    setLoading(false)
     
     // Check if chain has terms or health statement
-    if (!chainData) {
+    if (!currentChainData) {
+      console.log('[GymDetailsPanel] No chain data available, generating pass directly')
       // No chain data, generate directly
       handleGeneratePass()
       return
     }
     
+    console.log('[GymDetailsPanel] Checking for terms/health statement in chain data:', currentChainData)
+    
+    // Check if terms exist - either as URL or as markdown content
     const hasTerms = 
-      (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '') || 
-      (chainData.use_terms_url && chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '')
+      (currentChainData.terms_url && typeof currentChainData.terms_url === 'string' && currentChainData.terms_url.trim() !== '') ||
+      (currentChainData.terms && typeof currentChainData.terms === 'string' && currentChainData.terms.trim() !== '')
+    
+    // Check if health statement exists - either as URL or as markdown content
     const hasHealthStatement =
-      (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '') ||
-      (chainData.use_health_statement_url && chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '')
+      (currentChainData.health_statement_url && typeof currentChainData.health_statement_url === 'string' && currentChainData.health_statement_url.trim() !== '') ||
+      (currentChainData.health_statement && typeof currentChainData.health_statement === 'string' && currentChainData.health_statement.trim() !== '')
+
+    console.log('[GymDetailsPanel] Has terms:', hasTerms, 'Has health statement:', hasHealthStatement)
 
     if (hasTerms || hasHealthStatement) {
+      console.log('[GymDetailsPanel] Showing terms modal')
       setShowTermsModal(true)
     } else {
+      console.log('[GymDetailsPanel] No terms/health statement, generating pass directly')
       // No terms/health statement, generate directly
       handleGeneratePass()
     }
@@ -273,7 +337,7 @@ export default function GymDetailsPanel({
               disabled={loading}
               className="block w-full px-6 py-3 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors text-center font-semibold mb-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Generating...' : 'Generate Pass'}
+              {loading ? 'Loading...' : 'Generate Pass'}
             </button>
           ) : (
             <>

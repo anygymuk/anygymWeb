@@ -136,12 +136,15 @@ export default function PassesView({
     try {
       // If chain data is available, check for terms
       if (chain) {
+        // Check if terms exist - either as URL or as markdown content
         const hasTerms = 
-          (chain.terms && typeof chain.terms === 'string' && chain.terms.trim() !== '') || 
-          (chain.use_terms_url && chain.terms_url && typeof chain.terms_url === 'string' && chain.terms_url.trim() !== '')
+          (chain.terms_url && typeof chain.terms_url === 'string' && chain.terms_url.trim() !== '') ||
+          (chain.terms && typeof chain.terms === 'string' && chain.terms.trim() !== '')
+        
+        // Check if health statement exists - either as URL or as markdown content
         const hasHealthStatement =
-          (chain.health_statement && typeof chain.health_statement === 'string' && chain.health_statement.trim() !== '') ||
-          (chain.use_health_statement_url && chain.health_statement_url && typeof chain.health_statement_url === 'string' && chain.health_statement_url.trim() !== '')
+          (chain.health_statement_url && typeof chain.health_statement_url === 'string' && chain.health_statement_url.trim() !== '') ||
+          (chain.health_statement && typeof chain.health_statement === 'string' && chain.health_statement.trim() !== '')
 
         if (hasTerms || hasHealthStatement) {
           // Show terms modal
@@ -156,12 +159,15 @@ export default function PassesView({
             const data = await response.json()
             if (data.gym_chain) {
               const chainData = data.gym_chain
+              // Check if terms exist - either as URL or as markdown content
               const hasTerms = 
-                (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '') || 
-                (chainData.use_terms_url && chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '')
+                (chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '') ||
+                (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '')
+              
+              // Check if health statement exists - either as URL or as markdown content
               const hasHealthStatement =
-                (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '') ||
-                (chainData.use_health_statement_url && chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '')
+                (chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '') ||
+                (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '')
 
               if (hasTerms || hasHealthStatement) {
                 // Show terms modal
@@ -329,22 +335,6 @@ export default function PassesView({
                   className="relative p-6 rounded-2xl bg-green-50 dark:bg-green-900/20 shadow-lg border border-green-100 dark:border-green-800"
                 >
                   {/* Active Status Badge - Top Right */}
-                  <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-800 rounded-lg">
-                    <svg
-                      className="w-4 h-4 text-green-600 dark:text-green-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </div>
-
                   <div className="flex flex-col md:flex-row gap-6 pr-24">
                     {/* Left Side - Pass Information */}
                     <div className="flex-1 space-y-3">

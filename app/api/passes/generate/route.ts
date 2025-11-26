@@ -32,19 +32,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('🏋️ [generatePass] Generating pass for gym:', gymId)
+    const gymIdInt = parseInt(gymId)
+    console.log('🏋️ [generatePass] Generating pass for gym:', gymId, 'parsed as:', gymIdInt)
+
+    // Prepare request data
+    const requestBody = {
+      auth0_id: auth0Id,
+      gym_id: gymIdInt,
+    }
+    
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      'auth0_id': auth0Id, // Pass auth0_id in header
+    }
+
+    console.log('📤 [generatePass] Request to external API:', {
+      url: 'https://api.any-gym.com/generate_pass',
+      method: 'POST',
+      headers: requestHeaders,
+      body: requestBody,
+    })
 
     // Call external API to generate pass
     const response = await fetch('https://api.any-gym.com/generate_pass', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'auth0_id': auth0Id, // Pass auth0_id in header
-      },
-      body: JSON.stringify({
-        auth0_id: auth0Id,
-        gym_id: parseInt(gymId),
-      }),
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
