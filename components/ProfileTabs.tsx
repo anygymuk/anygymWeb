@@ -362,8 +362,8 @@ export default function ProfileTabs({
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Membership
                       </label>
-                      <p className="text-gray-900 dark:text-white capitalize">
-                        {subscription.tier} Member
+                      <p className="text-gray-900 dark:text-white">
+                        {subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1).toLowerCase()} Member
                       </p>
                     </div>
                   )}

@@ -146,7 +146,7 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
   }
 
   const getTierDisplayName = (tier: string) => {
-    return tier.charAt(0).toUpperCase() + tier.slice(1)
+    return tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase()
   }
 
   const currentTier = subscription?.tier?.toLowerCase() || null

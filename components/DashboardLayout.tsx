@@ -92,7 +92,9 @@ export default function DashboardLayout({
                 {userName}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {subscription ? `${subscription.tier} Member` : 'anygym Member'}
+                {subscription 
+                  ? `${subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1).toLowerCase()} Member` 
+                  : 'anygym Member'}
               </p>
             </div>
           </div>
