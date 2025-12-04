@@ -1,7 +1,6 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
 import DashboardLayout from '@/components/DashboardLayout'
-import { sql } from '@/lib/db'
 import { Subscription } from '@/lib/types'
 import SubscriptionManager from '@/components/SubscriptionManager'
 import { StripeProduct } from '@/app/api/stripe/products/route'
@@ -11,36 +10,81 @@ import { getOrCreateAppUser } from '@/lib/user'
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
 
-async function getUserSubscription(userId: string): Promise<Subscription | null> {
+async function getUserSubscription(auth0Id: string): Promise<Subscription | null> {
   try {
-    const result = await sql`
-      SELECT * FROM subscriptions 
-      WHERE user_id = ${userId} 
-      ORDER BY created_at DESC
-      LIMIT 1
-    `
-    if (result.length === 0) return null
+    console.log('[getUserSubscription] Fetching subscription for auth0Id:', auth0Id)
     
-    const row = result[0]
+    if (!auth0Id) {
+      console.log('[getUserSubscription] No auth0Id provided')
+      return null
+    }
+
+    // Fetch subscription from external API
+    const trimmedAuth0Id = auth0Id.trim()
+    const response = await fetch('https://api.any-gym.com/user/subscription', {
+      headers: {
+        'auth0_id': trimmedAuth0Id,
+      },
+      next: { revalidate: 60 } // Cache for 1 minute
+    })
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log('[getUserSubscription] No subscription found (404)')
+        return null
+      }
+      throw new Error(`Failed to fetch subscription: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    console.log('[getUserSubscription] API response:', JSON.stringify(data, null, 2))
+    
+    // Handle nested subscription object in API response
+    const subscriptionData = data.subscription || data
+    
+    // Parse next_billing_date
+    let nextBillingDate: Date
+    if (subscriptionData.next_billing_date) {
+      const billingDateStr = subscriptionData.next_billing_date
+      if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
+        nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
+      } else {
+        nextBillingDate = new Date(billingDateStr)
+      }
+    } else {
+      nextBillingDate = subscriptionData.current_period_end 
+        ? new Date(subscriptionData.current_period_end)
+        : new Date()
+    }
+    
+    // Map API response to Subscription type
     return {
-      id: row.id,
-      userId: row.user_id,
-      tier: row.tier,
-      monthlyLimit: row.monthly_limit,
-      visitsUsed: row.visits_used,
-      price: parseFloat(row.price),
-      startDate: new Date(row.start_date),
-      nextBillingDate: new Date(row.next_billing_date),
-      status: row.status,
-      stripeSubscriptionId: row.stripe_subscription_id,
-      stripeCustomerId: row.stripe_customer_id,
-      guestPassesLimit: row.guest_passes_limit,
-      guestPassesUsed: row.guest_passes_used,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
+      id: subscriptionData.id || 0,
+      userId: subscriptionData.user_id || auth0Id,
+      tier: subscriptionData.tier || 'standard',
+      monthlyLimit: subscriptionData.monthly_limit != null ? Number(subscriptionData.monthly_limit) : 0,
+      visitsUsed: subscriptionData.visits_used != null ? Number(subscriptionData.visits_used) : 0,
+      price: subscriptionData.price != null ? parseFloat(subscriptionData.price) : 0,
+      startDate: subscriptionData.start_date 
+        ? new Date(subscriptionData.start_date)
+        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+      nextBillingDate: nextBillingDate,
+      currentPeriodStart: subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date(),
+      currentPeriodEnd: subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date(),
+      status: subscriptionData.status || 'active',
+      stripeSubscriptionId: subscriptionData.stripe_subscription_id || undefined,
+      stripeCustomerId: subscriptionData.stripe_customer_id || undefined,
+      guestPassesLimit: subscriptionData.guest_passes_limit != null ? Number(subscriptionData.guest_passes_limit) : 0,
+      guestPassesUsed: subscriptionData.guest_passes_used != null ? Number(subscriptionData.guest_passes_used) : 0,
+      createdAt: subscriptionData.created_at 
+        ? new Date(subscriptionData.created_at)
+        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+      updatedAt: subscriptionData.updated_at 
+        ? new Date(subscriptionData.updated_at)
+        : (subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date()),
     } as Subscription
   } catch (error) {
-    console.error('Error fetching subscription:', error)
+    console.error('[getUserSubscription] Error fetching subscription:', error)
     return null
   }
 }
@@ -190,11 +234,11 @@ export default async function ProfilePage({
     redirect('/api/auth/login')
   }
 
-  const userId = session.user.sub
+  const auth0Id = session.user.sub
   
   // Check onboarding status - redirect if not completed
   const { needsOnboarding } = await getOrCreateAppUser(
-    userId,
+    auth0Id,
     session.user.email,
     session.user.name
   )
@@ -202,8 +246,10 @@ export default async function ProfilePage({
   if (needsOnboarding) {
     redirect('/onboarding')
   }
+  
+  // Fetch subscription from API
   const [subscription, products] = await Promise.all([
-    getUserSubscription(userId),
+    getUserSubscription(auth0Id),
     getStripeProducts(),
   ])
 

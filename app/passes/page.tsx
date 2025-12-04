@@ -1,6 +1,5 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { sql } from '@/lib/db'
 import { GymPass, Subscription } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import PassesView from '@/components/PassesView'
@@ -10,191 +9,9 @@ import { getOrCreateAppUser } from '@/lib/user'
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
 
-/**
- * Get the app user ID from the Auth0 ID by looking up the app_users table
- * Creates the user if they don't exist
- */
-async function getAppUserId(auth0Id: string, userEmail?: string, userName?: string): Promise<number | null> {
+async function getUserSubscription(auth0Id?: string): Promise<Subscription | null> {
   try {
-    console.log('[getAppUserId] Starting lookup for auth0_id:', auth0Id)
-    console.log('[getAppUserId] Auth0 ID type:', typeof auth0Id, 'length:', auth0Id?.length)
-    console.log('[getAppUserId] Auth0 ID JSON:', JSON.stringify(auth0Id))
-    
-    // Normalize the auth0_id (trim whitespace)
-    const normalizedAuth0Id = auth0Id?.trim()
-    
-    // First, try exact match
-    let result = await sql`
-      SELECT id FROM app_users 
-      WHERE auth0_id = ${normalizedAuth0Id}
-      LIMIT 1
-    `
-    
-    console.log('[getAppUserId] Exact match query result:', result)
-    
-    // If not found, try case-insensitive match (in case of encoding issues)
-    if (result.length === 0) {
-      console.log('[getAppUserId] Trying case-insensitive match...')
-      result = await sql`
-        SELECT id FROM app_users 
-        WHERE LOWER(TRIM(auth0_id)) = LOWER(${normalizedAuth0Id})
-        LIMIT 1
-      `
-      console.log('[getAppUserId] Case-insensitive query result:', result)
-    }
-    
-    // If still not found, try to find by email as fallback
-    if (result.length === 0 && userEmail) {
-      console.log('[getAppUserId] Trying email fallback:', userEmail)
-      result = await sql`
-        SELECT id FROM app_users 
-        WHERE email = ${userEmail}
-        LIMIT 1
-      `
-      console.log('[getAppUserId] Email fallback query result:', result)
-      
-      // If found by email, update the auth0_id to match
-      if (result.length > 0) {
-        const appUserId = result[0].id
-        console.log('[getAppUserId] Found user by email, updating auth0_id...')
-        try {
-          await sql`
-            UPDATE app_users 
-            SET auth0_id = ${normalizedAuth0Id}, updated_at = NOW()
-            WHERE id = ${appUserId}
-          `
-          console.log('[getAppUserId] Updated auth0_id for user:', appUserId)
-        } catch (updateError: any) {
-          console.error('[getAppUserId] Error updating auth0_id:', updateError?.message)
-          // Continue anyway - we have the user ID
-        }
-        return appUserId
-      }
-    }
-    
-    if (result.length > 0) {
-      const appUserId = result[0].id
-      console.log('[getAppUserId] Found existing app user ID:', appUserId, 'for auth0_id:', normalizedAuth0Id)
-      return appUserId
-    }
-    
-    // User doesn't exist, create them
-    console.log('[getAppUserId] User not found, creating new user for auth0_id:', normalizedAuth0Id)
-    console.log('[getAppUserId] User data:', { email: userEmail, name: userName })
-    
-    // Before creating, let's check what auth0_ids exist in the database for debugging
-    try {
-      const allUsers = await sql`
-        SELECT id, auth0_id, email FROM app_users
-        ORDER BY created_at DESC
-        LIMIT 10
-      `
-      console.log('[getAppUserId] Sample users in database:', JSON.stringify(allUsers, null, 2))
-    } catch (debugError: any) {
-      console.warn('[getAppUserId] Could not fetch sample users:', debugError?.message)
-    }
-    
-    try {
-      // Try to get table structure first to see what columns exist (optional, don't fail if this errors)
-      try {
-        const tableInfo = await sql`
-          SELECT column_name, data_type 
-          FROM information_schema.columns 
-          WHERE table_name = 'app_users'
-          ORDER BY ordinal_position
-        `
-        console.log('[getAppUserId] app_users table structure:', JSON.stringify(tableInfo, null, 2))
-      } catch (tableInfoError: any) {
-        console.warn('[getAppUserId] Could not fetch table structure:', tableInfoError?.message)
-        // Continue anyway - this is just for debugging
-      }
-      
-      const insertResult = await sql`
-        INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
-        VALUES (${normalizedAuth0Id}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
-        RETURNING id
-      `
-      
-      console.log('[getAppUserId] Insert result:', insertResult)
-      
-      if (insertResult.length > 0) {
-        const appUserId = insertResult[0].id
-        console.log('[getAppUserId] Created new app user with ID:', appUserId, 'for auth0_id:', normalizedAuth0Id)
-        return appUserId
-      } else {
-        console.error('[getAppUserId] Insert succeeded but no ID returned')
-      }
-    } catch (insertError: any) {
-      console.error('[getAppUserId] Insert error details:', {
-        message: insertError?.message,
-        code: insertError?.code,
-        detail: insertError?.detail,
-        hint: insertError?.hint,
-        stack: insertError?.stack,
-      })
-      
-      // If insert fails, check if it's because of a unique constraint (user was created concurrently)
-      if (insertError?.code === '23505' || insertError?.message?.includes('unique') || insertError?.message?.includes('duplicate')) {
-        console.log('[getAppUserId] User was created concurrently, fetching again...')
-        // Try to fetch again with both exact and case-insensitive
-        result = await sql`
-          SELECT id FROM app_users 
-          WHERE auth0_id = ${normalizedAuth0Id}
-          LIMIT 1
-        `
-        if (result.length === 0) {
-          result = await sql`
-            SELECT id FROM app_users 
-            WHERE LOWER(TRIM(auth0_id)) = LOWER(${normalizedAuth0Id})
-            LIMIT 1
-          `
-        }
-        if (result.length > 0) {
-          const appUserId = result[0].id
-          console.log('[getAppUserId] Found app user ID after concurrent creation:', appUserId)
-          return appUserId
-        }
-      }
-      
-      // If it's a column error, try a simpler insert
-      if (insertError?.message?.includes('column') || insertError?.code === '42703') {
-        console.log('[getAppUserId] Column error detected, trying minimal insert...')
-        try {
-          const minimalInsert = await sql`
-            INSERT INTO app_users (auth0_id)
-            VALUES (${auth0Id})
-            RETURNING id
-          `
-          if (minimalInsert.length > 0) {
-            console.log('[getAppUserId] Created user with minimal fields:', minimalInsert[0].id)
-            return minimalInsert[0].id
-          }
-        } catch (minimalError: any) {
-          console.error('[getAppUserId] Minimal insert also failed:', minimalError?.message)
-        }
-      }
-      
-      // Don't throw - return null so we can show a better error message
-      console.error('[getAppUserId] Failed to create user after all attempts')
-      return null
-    }
-    
-    console.error('[getAppUserId] Failed to create or find user - no error thrown but no result')
-    return null
-  } catch (error: any) {
-    console.error('[getAppUserId] Top-level error:', {
-      message: error?.message,
-      code: error?.code,
-      detail: error?.detail,
-      stack: error?.stack,
-    })
-    return null
-  }
-}
-
-async function getUserSubscription(appUserId: number | null, auth0Id?: string): Promise<Subscription | null> {
-  try {
-    console.log('[getUserSubscription] Looking up subscription for appUserId:', appUserId, 'auth0Id:', auth0Id)
+    console.log('[getUserSubscription] Looking up subscription for auth0Id:', auth0Id)
     
     if (!auth0Id) {
       console.log('[getUserSubscription] No auth0Id provided')
@@ -411,7 +228,7 @@ async function fetchUserPassesFromAPI(auth0Id: string): Promise<{ passes: GymPas
   }
 }
 
-async function getActivePasses(appUserId: number | null, auth0Id?: string): Promise<GymPass[]> {
+async function getActivePasses(auth0Id?: string): Promise<GymPass[]> {
   try {
     if (!auth0Id) {
       console.log('[getActivePasses] No auth0Id provided')
@@ -443,7 +260,7 @@ async function getActivePasses(appUserId: number | null, auth0Id?: string): Prom
 }
 
 
-async function getAllUserPasses(appUserId: number | null, auth0Id?: string) {
+async function getAllUserPasses(auth0Id?: string) {
   try {
     if (!auth0Id) {
       console.log('[getAllUserPasses] No auth0Id provided')
@@ -467,7 +284,7 @@ async function getAllUserPasses(appUserId: number | null, auth0Id?: string) {
   }
 }
 
-async function getPassHistory(appUserId: number | null, auth0Id?: string) {
+async function getPassHistory(auth0Id?: string) {
   try {
     if (!auth0Id) {
       console.log('[getPassHistory] No auth0Id provided')
@@ -617,30 +434,10 @@ export default async function PassesPage() {
     email: userEmail,
   })
   
-  // Get the app user ID from app_users table (creates if doesn't exist)
-  let appUserId: number | null = null
-  
-  try {
-    appUserId = await getAppUserId(auth0Id, userEmail, userName)
-  } catch (error: any) {
-    console.error('[PassesPage] Error in getAppUserId:', {
-      message: error?.message,
-      code: error?.code,
-      stack: error?.stack,
-    })
-    // Continue to show error page instead of crashing
-  }
-  
-  // Note: We no longer check the database for passes since all data comes from API
-  // The getAppUserId function handles user creation via API if needed
-  
-  // If no appUserId but we have Auth0 ID, we can still query passes via API
-  // Only show error if we have neither
-  if (!appUserId && !auth0Id) {
-    console.error('[PassesPage] No app user found and no Auth0 ID available')
-    console.error('[PassesPage] Check server logs above for detailed error information')
-    
-    // Show a more helpful error message
+  // All data fetching now uses the API with auth0Id
+  // No database queries needed - getOrCreateAppUser above handles user creation via API
+  if (!auth0Id) {
+    console.error('[PassesPage] No Auth0 ID available')
     return (
       <DashboardLayout
         userName={session.user.name || session.user.email || 'User'}
@@ -652,12 +449,6 @@ export default async function PassesPage() {
     )
   }
   
-  // If we have Auth0 ID but no appUserId, log it but continue (API uses auth0Id)
-  if (!appUserId && auth0Id) {
-    console.warn('[PassesPage] No appUserId found, but using Auth0 ID for API queries:', auth0Id)
-  }
-  
-  console.log('[PassesPage] App User ID:', appUserId)
   console.log('[PassesPage] Auth0 ID:', auth0Id)
   console.log('[PassesPage] ==========================================')
   
@@ -725,20 +516,20 @@ export default async function PassesPage() {
     } else {
       console.log('[PassesPage] No subscription in /user/passes response, trying /user/subscription')
       // Fall back to separate subscription endpoint
-      subscription = await getUserSubscription(appUserId, auth0Id)
+      subscription = await getUserSubscription(auth0Id)
     }
     
     console.log('[PassesPage] Final subscription:', subscription)
     console.log('[PassesPage] Subscription visitsUsed:', subscription?.visitsUsed)
     
     // Get passes - filter from the fetched passes
-    const activePasses = await getActivePasses(appUserId || 0, auth0Id)
+    const activePasses = await getActivePasses(auth0Id)
     console.log('[PassesPage] Active passes:', activePasses.length, activePasses)
     
-    const allPasses = await getAllUserPasses(appUserId || 0, auth0Id)
+    const allPasses = await getAllUserPasses(auth0Id)
     console.log('[PassesPage] All passes:', allPasses.length, allPasses)
     
-    const passHistory = await getPassHistory(appUserId || 0, auth0Id)
+    const passHistory = await getPassHistory(auth0Id)
     console.log('[PassesPage] Pass history result:', passHistory.length, passHistory)
 
     // Get user initials for avatar

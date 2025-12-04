@@ -76,24 +76,43 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // Build update body with only fields that have values (non-empty)
+    const updateBody: Record<string, string> = {}
+    
+    if (fullName) {
+      updateBody.full_name = fullName
+      updateBody.name = fullName
+    }
+    if (dateOfBirth) {
+      updateBody.date_of_birth = dateOfBirth
+    }
+    if (addressLine1) {
+      updateBody.address_line1 = addressLine1
+    }
+    if (addressLine2) {
+      updateBody.address_line2 = addressLine2
+    }
+    if (addressCity) {
+      updateBody.address_city = addressCity
+    }
+    if (addressPostcode) {
+      updateBody.address_postcode = addressPostcode
+    }
+    if (emergencyContactName) {
+      updateBody.emergency_contact_name = emergencyContactName
+    }
+    if (emergencyContactNumber) {
+      updateBody.emergency_contact_number = emergencyContactNumber
+    }
+
     // Update user data via external API
-    const response = await fetch('https://api.any-gym.com/user', {
+    const response = await fetch('https://api.any-gym.com/user/update', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'auth0_id': auth0Id,
+        'auth0_id': auth0Id.trim(),
       },
-      body: JSON.stringify({
-        full_name: fullName,
-        name: fullName,
-        date_of_birth: dateOfBirth,
-        address_line1: addressLine1,
-        address_line2: addressLine2 || null,
-        address_city: addressCity,
-        address_postcode: addressPostcode,
-        emergency_contact_name: emergencyContactName,
-        emergency_contact_number: emergencyContactNumber,
-      }),
+      body: JSON.stringify(updateBody),
     })
 
     if (!response.ok) {
