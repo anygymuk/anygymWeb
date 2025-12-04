@@ -18,8 +18,15 @@ export async function GET(request: NextRequest) {
     const tier = searchParams.get('tier')
     const chainId = searchParams.get('chain')
 
-    // Fetch all gyms from external API
-    const response = await fetch('https://api.any-gym.com/gyms', {
+    // Build query parameters for external API
+    const apiParams = new URLSearchParams()
+    if (searchQuery) apiParams.set('search', searchQuery)
+    if (tier && tier !== 'All Tiers') apiParams.set('tier', tier)
+    if (chainId && chainId !== 'All Chains') apiParams.set('chain', chainId)
+
+    // Fetch gyms from external API with query parameters
+    const apiUrl = `https://api.any-gym.com/gyms${apiParams.toString() ? `?${apiParams.toString()}` : ''}`
+    const response = await fetch(apiUrl, {
       next: { revalidate: 3600 } // Cache for 1 hour
     })
     

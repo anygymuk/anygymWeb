@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { sql } from '@/lib/db'
 import { getOrCreateAppUser } from '@/lib/user'
 
 export const runtime = 'nodejs'
@@ -48,22 +47,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Update user with onboarding data
-    await sql`
-      UPDATE app_users
-      SET 
-        full_name = ${name},
-        date_of_birth = ${dateOfBirth},
-        address_line1 = ${addressLine1},
-        address_line2 = ${addressLine2 || null},
-        address_city = ${addressCity},
-        address_postcode = ${addressPostcode},
-        emergency_contact_name = ${emergencyContactName},
-        emergency_contact_number = ${emergencyContactNumber},
-        onboarding_completed = true,
-        updated_at = NOW()
-      WHERE auth0_id = ${user.auth0_id}
-    `
+    // Update user with onboarding data via API
+    const response = await fetch('https://api.any-gym.com/user', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'auth0_id': auth0Id,
+      },
+      body: JSON.stringify({
+        full_name: name,
+        name: name,
+        date_of_birth: dateOfBirth,
+        address_line1: addressLine1,
+        address_line2: addressLine2 || null,
+        address_city: addressCity,
+        address_postcode: addressPostcode,
+        emergency_contact_name: emergencyContactName,
+        emergency_contact_number: emergencyContactNumber,
+        onboarding_completed: true,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to update user' }))
+      throw new Error(errorData.error || `Failed to update user: ${response.statusText}`)
+    }
 
     return NextResponse.json({
       success: true,

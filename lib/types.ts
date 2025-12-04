@@ -43,6 +43,8 @@ export interface Subscription {
   price: number
   startDate: Date
   nextBillingDate: Date
+  currentPeriodStart: Date
+  currentPeriodEnd: Date
   status: string
   stripeSubscriptionId?: string
   stripeCustomerId?: string

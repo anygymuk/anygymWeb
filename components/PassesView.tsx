@@ -31,14 +31,12 @@ interface PassesViewProps {
   subscription: Subscription | null
   activePasses: GymPass[]
   passHistory: PassHistoryItem[]
-  passesInBillingPeriod: number
 }
 
 export default function PassesView({
-  subscription,
-  activePasses,
-  passHistory,
-  passesInBillingPeriod,
+  subscription: initialSubscription,
+  activePasses: initialActivePasses,
+  passHistory: initialPassHistory,
 }: PassesViewProps) {
   const router = useRouter()
   const [expandedGyms, setExpandedGyms] = useState<Set<number>>(new Set())
@@ -46,10 +44,18 @@ export default function PassesView({
   const [loadingGymId, setLoadingGymId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   
+  // Local state for data that can be updated without page reload
+  const [subscription, setSubscription] = useState<Subscription | null>(initialSubscription)
+  const [activePasses, setActivePasses] = useState<GymPass[]>(initialActivePasses)
+  const [passHistory, setPassHistory] = useState<PassHistoryItem[]>(initialPassHistory)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  
   // Debug logging with error handling
   useEffect(() => {
     try {
       console.log('[PassesView] Component rendered with props:')
+      console.log('[PassesView] subscription:', subscription)
+      console.log('[PassesView] subscription exists?', !!subscription)
       console.log('[PassesView] passHistory:', passHistory)
       console.log('[PassesView] passHistory length:', passHistory?.length || 0)
       console.log('[PassesView] passHistory type:', typeof passHistory)
@@ -62,54 +68,125 @@ export default function PassesView({
     } catch (error) {
       console.error('[PassesView] Error in debug logging:', error)
     }
-  }, [passHistory, activePasses])
+  }, [subscription, passHistory, activePasses])
   
-  // Use actual passes created in billing period instead of visitsUsed
-  // Ensure passesInBillingPeriod is a valid number
-  const passesCreated = (typeof passesInBillingPeriod === 'number' && !isNaN(passesInBillingPeriod)) 
-    ? passesInBillingPeriod 
+  // Debug logging
+  console.log('[PassesView] Subscription object:', subscription)
+  console.log('[PassesView] Subscription keys:', subscription ? Object.keys(subscription) : 'null')
+  if (subscription) {
+    console.log('[PassesView] Subscription raw values:', {
+      visitsUsed: subscription.visitsUsed,
+      monthlyLimit: subscription.monthlyLimit,
+      price: subscription.price,
+      tier: subscription.tier,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      nextBillingDate: subscription.nextBillingDate,
+      guestPassesUsed: subscription.guestPassesUsed,
+      guestPassesLimit: subscription.guestPassesLimit,
+    })
+  }
+  
+  // Use visits_used from subscription API response
+  // Handle both number and string values (Date objects become strings when serialized from server)
+  const visitsUsed = subscription?.visitsUsed != null 
+    ? (typeof subscription.visitsUsed === 'string' ? parseFloat(subscription.visitsUsed) : Number(subscription.visitsUsed))
     : 0
   
   // Get monthly limit from subscription - ensure it's a number
-  const monthlyLimit = subscription?.monthlyLimit 
-    ? (typeof subscription.monthlyLimit === 'number' 
-        ? subscription.monthlyLimit 
-        : Number(subscription.monthlyLimit) || 0)
+  const monthlyLimit = subscription?.monthlyLimit != null 
+    ? (typeof subscription.monthlyLimit === 'string' ? parseFloat(subscription.monthlyLimit) : Number(subscription.monthlyLimit))
     : 0
   
-  // Debug logging
-  console.log('[PassesView] Progress bar calculation:', {
-    passesCreated,
+  // Get price from subscription
+  const price = subscription?.price != null 
+    ? (typeof subscription.price === 'string' ? parseFloat(subscription.price) : parseFloat(String(subscription.price)))
+    : 0
+  
+  // Get billing period dates from subscription
+  // Dates are serialized as strings when passed from server to client, so handle both Date and string
+  let currentPeriodStart: Date | null = null
+  let currentPeriodEnd: Date | null = null
+  let nextBillingDate: Date | null = null
+  
+  if (subscription?.currentPeriodStart) {
+    try {
+      currentPeriodStart = subscription.currentPeriodStart instanceof Date 
+        ? subscription.currentPeriodStart 
+        : new Date(subscription.currentPeriodStart)
+      if (isNaN(currentPeriodStart.getTime())) currentPeriodStart = null
+    } catch (e) {
+      console.error('[PassesView] Error parsing currentPeriodStart:', e)
+    }
+  }
+  
+  if (subscription?.currentPeriodEnd) {
+    try {
+      currentPeriodEnd = subscription.currentPeriodEnd instanceof Date 
+        ? subscription.currentPeriodEnd 
+        : new Date(subscription.currentPeriodEnd)
+      if (isNaN(currentPeriodEnd.getTime())) currentPeriodEnd = null
+    } catch (e) {
+      console.error('[PassesView] Error parsing currentPeriodEnd:', e)
+    }
+  }
+  
+  if (subscription?.nextBillingDate) {
+    try {
+      nextBillingDate = subscription.nextBillingDate instanceof Date 
+        ? subscription.nextBillingDate 
+        : new Date(subscription.nextBillingDate)
+      if (isNaN(nextBillingDate.getTime())) nextBillingDate = null
+    } catch (e) {
+      console.error('[PassesView] Error parsing nextBillingDate:', e)
+    }
+  }
+  
+  // Get tier from subscription
+  const tier = subscription?.tier || 'Premium'
+  
+  // Get guest passes values
+  const guestPassesUsed = subscription?.guestPassesUsed != null 
+    ? (typeof subscription.guestPassesUsed === 'string' ? parseFloat(subscription.guestPassesUsed) : Number(subscription.guestPassesUsed))
+    : 0
+  const guestPassesLimit = subscription?.guestPassesLimit != null 
+    ? (typeof subscription.guestPassesLimit === 'string' ? parseFloat(subscription.guestPassesLimit) : Number(subscription.guestPassesLimit))
+    : 0
+  
+  console.log('[PassesView] Extracted values:', {
+    visitsUsed,
     monthlyLimit,
-    subscription: subscription ? {
-      id: subscription.id,
-      tier: subscription.tier,
-      monthlyLimit: subscription.monthlyLimit,
-      monthlyLimitType: typeof subscription.monthlyLimit,
-    } : null,
+    price,
+    tier,
+    currentPeriodStart: currentPeriodStart?.toISOString() || 'null',
+    currentPeriodEnd: currentPeriodEnd?.toISOString() || 'null',
+    nextBillingDate: nextBillingDate?.toISOString() || 'null',
+    guestPassesUsed,
+    guestPassesLimit,
   })
   
   // Calculate remaining passes and percentage
-  const visitsRemaining = Math.max(0, monthlyLimit - passesCreated)
+  const visitsRemaining = Math.max(0, monthlyLimit - visitsUsed)
   const visitsPercentage = monthlyLimit > 0 
-    ? Math.min(100, Math.max(0, (passesCreated / monthlyLimit) * 100))
+    ? Math.min(100, Math.max(0, (visitsUsed / monthlyLimit) * 100))
     : 0
-  
-  console.log('[PassesView] Calculated values:', {
-    passesCreated,
-    monthlyLimit,
-    visitsRemaining,
-    visitsPercentage,
-    formula: monthlyLimit > 0 ? `(${passesCreated} / ${monthlyLimit}) * 100 = ${visitsPercentage}%` : 'N/A (no limit)',
-    passesInBillingPeriodProp: passesInBillingPeriod,
-  })
   
   // Ensure percentage is valid for rendering
   const displayPercentage = isNaN(visitsPercentage) || !isFinite(visitsPercentage) ? 0 : visitsPercentage
 
-  const guestPassesUsed = subscription?.guestPassesUsed || 0
-  const guestPassesLimit = subscription?.guestPassesLimit || 0
+  // Guest passes values already extracted above
   const guestPassesRemaining = guestPassesLimit - guestPassesUsed
+  
+  // Debug: Log what will be rendered
+  console.log('[PassesView] Rendering values:', {
+    tierDisplay: tier,
+    visitsDisplay: `${visitsUsed}${monthlyLimit > 0 ? `/${monthlyLimit}` : ''}`,
+    monthlyLimitIsGreaterThanZero: monthlyLimit > 0,
+    subscriptionExists: !!subscription,
+    displayPercentage,
+    visitsRemaining,
+    guestPassesDisplay: `${guestPassesUsed}/${guestPassesLimit}`,
+  })
   const guestPassesPercentage =
     guestPassesLimit > 0 ? (guestPassesUsed / guestPassesLimit) * 100 : 0
 
@@ -134,59 +211,169 @@ export default function PassesView({
     setError(null)
 
     try {
-      // If chain data is available, check for terms
-      if (chain) {
-        // Check if terms exist - either as URL or as markdown content
-        const hasTerms = 
-          (chain.terms_url && typeof chain.terms_url === 'string' && chain.terms_url.trim() !== '') ||
-          (chain.terms && typeof chain.terms === 'string' && chain.terms.trim() !== '')
-        
-        // Check if health statement exists - either as URL or as markdown content
-        const hasHealthStatement =
-          (chain.health_statement_url && typeof chain.health_statement_url === 'string' && chain.health_statement_url.trim() !== '') ||
-          (chain.health_statement && typeof chain.health_statement === 'string' && chain.health_statement.trim() !== '')
+      // Always fetch full chain data to check for terms and health statements
+      // The chain data from pass history may only have basic info (name, logo) without terms
+      try {
+        const response = await fetch(`/api/gyms/${gymId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.gym_chain) {
+            const chainData = data.gym_chain
+            // Check if terms exist - either as URL or as markdown content
+            const hasTerms = 
+              (chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '') ||
+              (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '')
+            
+            // Check if health statement exists - either as URL or as markdown content
+            const hasHealthStatement =
+              (chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '') ||
+              (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '')
 
-        if (hasTerms || hasHealthStatement) {
-          // Show terms modal
-          setShowTermsModal({ gymId, chain })
-          return
-        }
-      } else {
-        // Fetch chain data to check for terms
-        try {
-          const response = await fetch(`/api/gyms/${gymId}`)
-          if (response.ok) {
-            const data = await response.json()
-            if (data.gym_chain) {
-              const chainData = data.gym_chain
-              // Check if terms exist - either as URL or as markdown content
-              const hasTerms = 
-                (chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '') ||
-                (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '')
-              
-              // Check if health statement exists - either as URL or as markdown content
-              const hasHealthStatement =
-                (chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '') ||
-                (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '')
-
-              if (hasTerms || hasHealthStatement) {
-                // Show terms modal
-                setShowTermsModal({ gymId, chain: chainData })
-                return
-              }
+            if (hasTerms || hasHealthStatement) {
+              // Show terms modal with full chain data
+              setShowTermsModal({ gymId, chain: chainData })
+              return
             }
           }
-        } catch (fetchError) {
-          console.error('Error fetching gym chain data:', fetchError)
-          // Continue to generate pass without terms check
         }
+      } catch (fetchError) {
+        console.error('Error fetching gym chain data:', fetchError)
+        // Continue to generate pass without terms check if fetch fails
       }
 
-      // No terms or couldn't fetch, generate directly
+      // No terms found, generate pass directly
       await generatePass(gymId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setLoadingGymId(null)
+    }
+  }
+
+  // Function to refresh passes data from API
+  const refreshPassesData = async () => {
+    setIsRefreshing(true)
+    try {
+      const response = await fetch('/api/passes/refresh')
+      if (!response.ok) {
+        console.error('[PassesView] Failed to refresh passes data')
+        return
+      }
+
+      const result = await response.json()
+      if (!result.success || !result.data) {
+        console.error('[PassesView] Invalid refresh response')
+        return
+      }
+
+      const data = result.data
+      console.log('[PassesView] Refreshed data from API:', data)
+
+      // Update subscription
+      if (data.subscription) {
+        const sub = data.subscription
+        let nextBillingDate: Date
+        if (sub.next_billing_date) {
+          const dateStr = sub.next_billing_date
+          nextBillingDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+            ? new Date(dateStr + 'T23:59:59.999Z')
+            : new Date(dateStr)
+        } else {
+          nextBillingDate = sub.current_period_end ? new Date(sub.current_period_end) : new Date()
+        }
+        
+        setSubscription({
+          id: sub.id || 0,
+          userId: sub.user_id || '',
+          tier: sub.tier || 'standard',
+          monthlyLimit: Number(sub.monthly_limit || 0),
+          visitsUsed: Number(sub.visits_used || 0),
+          price: parseFloat(sub.price || 0),
+          startDate: sub.start_date ? new Date(sub.start_date) : (sub.current_period_start ? new Date(sub.current_period_start) : new Date()),
+          nextBillingDate,
+          currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start) : new Date(),
+          currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end) : new Date(),
+          status: sub.status || 'active',
+          stripeSubscriptionId: sub.stripe_subscription_id,
+          stripeCustomerId: sub.stripe_customer_id,
+          guestPassesLimit: Number(sub.guest_passes_limit || 0),
+          guestPassesUsed: Number(sub.guest_passes_used || 0),
+          createdAt: sub.created_at ? new Date(sub.created_at) : (sub.current_period_start ? new Date(sub.current_period_start) : new Date()),
+          updatedAt: sub.updated_at ? new Date(sub.updated_at) : (sub.current_period_end ? new Date(sub.current_period_end) : new Date()),
+        })
+      }
+
+      // Update active passes
+      const activeData = data.active_passes || []
+      console.log('[PassesView] Active passes data from API:', activeData)
+      console.log('[PassesView] First active pass sample:', activeData[0])
+      
+      const now = new Date()
+      const updatedActive = activeData
+        .filter((p: any) => {
+          const validUntil = p.valid_until ? new Date(p.valid_until) : null
+          return p.status === 'active' && validUntil && validUntil > now
+        })
+        .map((p: any) => {
+          // Map gym data - API has gym_name directly on pass object (not nested)
+          // Structure: { gym_id, gym_name, gym_chain_id, gym_chain_name, gym_chain_logo, ... }
+          let gymData = p.gym
+          
+          // If no nested gym object, create one from flat pass data (matches API response structure)
+          if (!gymData && p.gym_name) {
+            console.log('[PassesView] Creating gym object from flat pass data, gym_name:', p.gym_name)
+            gymData = {
+              id: p.gym_id,
+              name: p.gym_name, // Use gym_name directly from pass object
+              address: '',
+              city: '',
+              postcode: '',
+              phone: undefined,
+              latitude: undefined,
+              longitude: undefined,
+              gym_chain_id: p.gym_chain_id,
+              required_tier: 'standard',
+              amenities: [],
+              opening_hours: {},
+              image_url: undefined,
+              rating: undefined,
+              status: 'active',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }
+          } else if (!gymData) {
+            console.warn('[PassesView] No gym data found for pass:', p.id, 'gym_name:', p.gym_name, 'gym object:', p.gym)
+          }
+          
+          return {
+            id: p.id,
+            userId: p.user_id || '',
+            gymId: p.gym_id,
+            passCode: p.pass_code || '',
+            status: p.status || 'active',
+            validUntil: p.valid_until ? new Date(p.valid_until) : new Date(),
+            usedAt: p.used_at ? new Date(p.used_at) : undefined,
+            qrCodeUrl: p.qrcode_url || p.qr_code_url, // API uses qrcode_url
+            subscriptionTier: p.subscription_tier,
+            passCost: p.pass_cost ? parseFloat(p.pass_cost) : undefined,
+            createdAt: p.created_at ? new Date(p.created_at) : new Date(),
+            updatedAt: p.updated_at ? new Date(p.updated_at) : new Date(),
+            gym: gymData,
+          } as GymPass
+        })
+        .sort((a: GymPass, b: GymPass) => b.createdAt.getTime() - a.createdAt.getTime())
+      
+      setActivePasses(updatedActive)
+      
+      // Note: router.refresh() will re-fetch server-side data, but due to Next.js caching
+      // (revalidate: 60 seconds), it might still show cached data if refreshed within that window.
+      // The client-side state updates above provide immediate UI updates.
+      // For a manual page refresh, the cache will eventually expire (60 seconds),
+      // but the client-side state ensures users see the updated data immediately after generation.
+      router.refresh()
+    } catch (err) {
+      console.error('[PassesView] Error refreshing passes data:', err)
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
@@ -196,28 +383,61 @@ export default function PassesView({
     setError(null)
 
     try {
+      console.log('[PassesView] generatePass called with gymId:', gymId, 'type:', typeof gymId)
+      
       const response = await fetch('/api/passes/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ gymId: gymId.toString() }),
+        body: JSON.stringify({ gymId: gymId }),
       })
 
       const data = await response.json()
+      
+      console.log('[PassesView] generatePass response status:', response.status)
+      console.log('[PassesView] generatePass response data:', data)
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to generate pass')
       }
 
-      // Redirect to passes page to see the newly generated pass
-      router.push('/passes')
+      // Refresh data from API instead of redirecting
+      await refreshPassesData()
+      setLoadingGymId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setLoadingGymId(null)
     }
   }
 
+  // Force render values to ensure they're displayed
+  const tierDisplay = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Premium'
+  const visitsDisplay = `${visitsUsed}${monthlyLimit > 0 ? `/${monthlyLimit}` : ''}`
+  
+  // Additional debug: Log right before render
+  console.log('[PassesView] About to render with:', {
+    tierDisplay,
+    visitsDisplay,
+    visitsUsed,
+    monthlyLimit,
+    displayPercentage,
+    subscriptionExists: !!subscription,
+    subscriptionTier: subscription?.tier,
+    subscriptionVisitsUsed: subscription?.visitsUsed,
+    subscriptionMonthlyLimit: subscription?.monthlyLimit,
+  })
+  
+  // Validate that values are actually numbers/strings before rendering
+  if (typeof visitsUsed !== 'number' || typeof monthlyLimit !== 'number') {
+    console.warn('[PassesView] Invalid value types:', {
+      visitsUsedType: typeof visitsUsed,
+      monthlyLimitType: typeof monthlyLimit,
+      visitsUsedValue: visitsUsed,
+      monthlyLimitValue: monthlyLimit,
+    })
+  }
+  
   return (
     <div className="space-y-6">
       {/* Monthly Usage Section */}
@@ -228,10 +448,10 @@ export default function PassesView({
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-                  {subscription?.tier || 'Premium'} Plan
+                  {tierDisplay || 'Premium'} Plan
                 </span>
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {passesCreated}{monthlyLimit > 0 ? `/${monthlyLimit}` : ''}
+                <span className="text-lg font-semibold text-gray-900 dark:text-white" data-testid="visits-display">
+                  {visitsDisplay || '0/0'}
                 </span>
               </div>
             </div>
@@ -276,19 +496,21 @@ export default function PassesView({
               </>
             )}
             <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-              {subscription?.nextBillingDate 
-                ? `Resets on ${new Date(subscription.nextBillingDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.`
-                : subscription 
-                  ? 'No billing date set.'
-                  : 'Get a subscription to generate passes.'}
+              {currentPeriodEnd 
+                ? `Resets on ${currentPeriodEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.`
+                : nextBillingDate
+                  ? `Resets on ${nextBillingDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.`
+                  : subscription 
+                    ? 'No billing date set.'
+                    : 'Get a subscription to generate passes.'}
             </p>
           </div>
 
           {/* Guest Passes Used */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                {guestPassesUsed}/{guestPassesLimit}
+              <span className="text-lg font-semibold text-gray-900 dark:text-white" data-testid="guest-passes-display">
+                {guestPassesUsed ?? 0}/{guestPassesLimit ?? 0}
               </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mb-2">
@@ -608,11 +830,6 @@ export default function PassesView({
                                       >
                                         {isUsed ? 'Used' : pass.status}
                                       </span>
-                                      {pass.subscriptionTier && (
-                                        <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-                                          {pass.subscriptionTier}
-                                        </span>
-                                      )}
                                     </div>
                                     <p className="text-sm text-gray-600 dark:text-gray-400">
                                       {isUsed ? 'Used' : 'Created'}: {new Date(passDate).toLocaleString('en-US', {

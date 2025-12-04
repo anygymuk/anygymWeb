@@ -1,7 +1,6 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { sql } from '@/lib/db'
 import { Gym } from '@/lib/types'
 import GymSearch from '@/components/GymSearch'
 import Logo from '@/components/Logo'
@@ -11,60 +10,54 @@ export const dynamic = 'force-dynamic'
 
 async function getGyms(searchQuery?: string): Promise<Gym[]> {
   try {
-    if (searchQuery) {
-      const result = await sql`
-        SELECT * FROM gyms 
-        WHERE name ILIKE ${'%' + searchQuery + '%'}
-           OR city ILIKE ${'%' + searchQuery + '%'}
-           OR postcode ILIKE ${'%' + searchQuery + '%'}
-        ORDER BY name
-        LIMIT 50
-      `
-      return result.map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        address: row.address,
-        city: row.city,
-        postcode: row.postcode,
-        phone: row.phone,
-        latitude: row.latitude ? parseFloat(row.latitude) : undefined,
-        longitude: row.longitude ? parseFloat(row.longitude) : undefined,
-        gym_chain_id: row.gym_chain_id,
-        required_tier: row.required_tier,
-        amenities: row.amenities,
-        opening_hours: row.opening_hours,
-        image_url: row.image_url,
-        rating: row.rating ? parseFloat(row.rating) : undefined,
-        status: row.status,
-        createdAt: new Date(row.created_at),
-        updatedAt: new Date(row.updated_at),
-      })) as Gym[]
-    } else {
-      const result = await sql`
-        SELECT * FROM gyms 
-        ORDER BY name
-        LIMIT 50
-      `
-      return result.map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        address: row.address,
-        city: row.city,
-        postcode: row.postcode,
-        phone: row.phone,
-        latitude: row.latitude ? parseFloat(row.latitude) : undefined,
-        longitude: row.longitude ? parseFloat(row.longitude) : undefined,
-        gym_chain_id: row.gym_chain_id,
-        required_tier: row.required_tier,
-        amenities: row.amenities,
-        opening_hours: row.opening_hours,
-        image_url: row.image_url,
-        rating: row.rating ? parseFloat(row.rating) : undefined,
-        status: row.status,
-        createdAt: new Date(row.created_at),
-        updatedAt: new Date(row.updated_at),
-      })) as Gym[]
+    // Fetch all gyms from external API
+    const response = await fetch('https://api.any-gym.com/gyms', {
+      next: { revalidate: 3600 } // Cache for 1 hour
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch gyms: ${response.statusText}`)
     }
+    
+    const data = await response.json()
+    
+    // Map API response to Gym type
+    let gyms: Gym[] = data
+      .filter((gym: any) => gym.latitude != null && gym.longitude != null)
+      .map((gym: any) => ({
+        id: gym.id,
+        name: gym.name,
+        address: gym.address || '',
+        city: gym.city || '',
+        postcode: gym.postcode || '',
+        phone: gym.phone || undefined,
+        latitude: gym.latitude ? parseFloat(gym.latitude) : undefined,
+        longitude: gym.longitude ? parseFloat(gym.longitude) : undefined,
+        gym_chain_id: gym.gym_chain_id || undefined,
+        required_tier: gym.required_tier || 'standard',
+        amenities: gym.amenities || [],
+        opening_hours: gym.opening_hours || {},
+        image_url: gym.image_url || undefined,
+        rating: undefined,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })) as Gym[]
+
+    // Apply search filter if provided
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      gyms = gyms.filter((gym) => 
+        gym.name.toLowerCase().includes(query) ||
+        gym.city.toLowerCase().includes(query) ||
+        gym.postcode.toLowerCase().includes(query)
+      )
+    }
+
+    // Sort by name
+    gyms.sort((a, b) => a.name.localeCompare(b.name))
+
+    return gyms
   } catch (error) {
     console.error('Error fetching gyms:', error)
     return []

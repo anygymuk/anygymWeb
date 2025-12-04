@@ -22,17 +22,29 @@ export async function POST(request: NextRequest) {
     console.log('👤 [generatePass] User:', { auth0Id })
 
     const body = await request.json().catch(() => ({}))
+    console.log('📥 [generatePass] Request body:', body)
+    
     const { gymId } = body
 
     if (!gymId) {
-      console.error('❌ [generatePass] Missing gymId')
+      console.error('❌ [generatePass] Missing gymId in body:', body)
       return NextResponse.json(
         { success: false, error: 'Gym ID is required' },
         { status: 400 }
       )
     }
 
-    const gymIdInt = parseInt(gymId)
+    // Parse gymId - handle both string and number
+    const gymIdInt = typeof gymId === 'string' ? parseInt(gymId, 10) : Number(gymId)
+    
+    if (isNaN(gymIdInt)) {
+      console.error('❌ [generatePass] Invalid gymId:', gymId)
+      return NextResponse.json(
+        { success: false, error: 'Invalid gym ID format' },
+        { status: 400 }
+      )
+    }
+    
     console.log('🏋️ [generatePass] Generating pass for gym:', gymId, 'parsed as:', gymIdInt)
 
     // Prepare request data

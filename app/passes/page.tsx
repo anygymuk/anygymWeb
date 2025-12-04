@@ -202,12 +202,17 @@ async function getUserSubscription(appUserId: number | null, auth0Id?: string): 
     }
 
     // Fetch subscription from external API
+    const trimmedAuth0Id = auth0Id.trim()
+    console.log('[getUserSubscription] Making request with auth0_id header:', trimmedAuth0Id)
+    
     const response = await fetch('https://api.any-gym.com/user/subscription', {
       headers: {
-        'auth0_id': auth0Id.trim(),
+        'auth0_id': trimmedAuth0Id,
       },
       next: { revalidate: 60 } // Cache for 1 minute
     })
+    
+    console.log('[getUserSubscription] Response status:', response.status, response.statusText)
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -218,494 +223,334 @@ async function getUserSubscription(appUserId: number | null, auth0Id?: string): 
     }
     
     const data = await response.json()
-    console.log('[getUserSubscription] API response:', data)
+    console.log('[getUserSubscription] API response:', JSON.stringify(data, null, 2))
+    
+    // Handle nested subscription object in API response
+    // API returns: { "subscription": { "tier": "...", "visits_used": ... } }
+    const subscriptionData = data.subscription || data
+    console.log('[getUserSubscription] Extracted subscriptionData:', JSON.stringify(subscriptionData, null, 2))
+    console.log('[getUserSubscription] subscriptionData.visits_used:', subscriptionData.visits_used, 'type:', typeof subscriptionData.visits_used)
+    
+    // Parse next_billing_date - API returns date string like "2025-12-30"
+    // If it's just a date string, parse it; if it's a full ISO datetime, use it directly
+    let nextBillingDate: Date
+    if (subscriptionData.next_billing_date) {
+      const billingDateStr = subscriptionData.next_billing_date
+      // If it's just a date (YYYY-MM-DD), add time to make it end of day
+      if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
+        nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
+      } else {
+        nextBillingDate = new Date(billingDateStr)
+      }
+    } else {
+      // Fallback to current_period_end if next_billing_date is not available
+      nextBillingDate = subscriptionData.current_period_end 
+        ? new Date(subscriptionData.current_period_end)
+        : new Date()
+    }
     
     // Map API response to Subscription type
-    // Adjust field mapping based on actual API response structure
-    return {
-      id: data.id || 0,
-      userId: data.user_id || auth0Id,
-      tier: data.tier || 'standard',
-      monthlyLimit: data.monthly_limit != null ? Number(data.monthly_limit) : 0,
-      visitsUsed: data.visits_used != null ? Number(data.visits_used) : 0,
-      price: data.price != null ? parseFloat(data.price) : 0,
-      startDate: data.start_date ? new Date(data.start_date) : new Date(),
-      nextBillingDate: data.next_billing_date ? new Date(data.next_billing_date) : new Date(),
-      status: data.status || 'active',
-      stripeSubscriptionId: data.stripe_subscription_id || undefined,
-      stripeCustomerId: data.stripe_customer_id || undefined,
-      guestPassesLimit: data.guest_passes_limit != null ? Number(data.guest_passes_limit) : 0,
-      guestPassesUsed: data.guest_passes_used != null ? Number(data.guest_passes_used) : 0,
-      createdAt: data.created_at ? new Date(data.created_at) : new Date(),
-      updatedAt: data.updated_at ? new Date(data.updated_at) : new Date(),
+    // Based on actual API response structure - only maps fields that exist
+    const subscriptionMapped = {
+      id: subscriptionData.id || 0,
+      userId: subscriptionData.user_id || auth0Id,
+      tier: subscriptionData.tier || 'standard',
+      monthlyLimit: subscriptionData.monthly_limit != null ? Number(subscriptionData.monthly_limit) : 0,
+      visitsUsed: subscriptionData.visits_used != null ? Number(subscriptionData.visits_used) : 0,
+      price: subscriptionData.price != null ? parseFloat(subscriptionData.price) : 0,
+      // Use current_period_start as startDate if start_date not available
+      startDate: subscriptionData.start_date 
+        ? new Date(subscriptionData.start_date)
+        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+      nextBillingDate: nextBillingDate,
+      currentPeriodStart: subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date(),
+      currentPeriodEnd: subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date(),
+      status: subscriptionData.status || 'active',
+      stripeSubscriptionId: subscriptionData.stripe_subscription_id || undefined,
+      stripeCustomerId: subscriptionData.stripe_customer_id || undefined,
+      guestPassesLimit: subscriptionData.guest_passes_limit != null ? Number(subscriptionData.guest_passes_limit) : 0,
+      guestPassesUsed: subscriptionData.guest_passes_used != null ? Number(subscriptionData.guest_passes_used) : 0,
+      // Use current_period_start/end for created/updated if not available
+      createdAt: subscriptionData.created_at 
+        ? new Date(subscriptionData.created_at)
+        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+      updatedAt: subscriptionData.updated_at 
+        ? new Date(subscriptionData.updated_at)
+        : (subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date()),
     } as Subscription
+    
+    console.log('[getUserSubscription] Mapped subscription object:', {
+      visitsUsed: subscriptionMapped.visitsUsed,
+      monthlyLimit: subscriptionMapped.monthlyLimit,
+      tier: subscriptionMapped.tier,
+      visitsUsedType: typeof subscriptionMapped.visitsUsed,
+    })
+    
+    return subscriptionMapped
   } catch (error) {
     console.error('Error fetching subscription:', error)
     return null
   }
 }
 
-async function updateExpiredPasses(appUserId: number | null, auth0Id?: string): Promise<void> {
+// Helper function to fetch all passes from API
+// This endpoint also returns subscription data, so we return both passes and subscription
+async function fetchUserPassesFromAPI(auth0Id: string): Promise<{ passes: GymPass[], subscription: any }> {
   try {
-    const now = new Date()
-    console.log('[updateExpiredPasses] Updating expired passes for appUserId:', appUserId, 'auth0Id:', auth0Id)
+    const trimmedAuth0Id = auth0Id.trim()
+    console.log('[fetchUserPassesFromAPI] Making request with auth0_id header:', trimmedAuth0Id)
     
-    // Update passes that have expired (valid_until < now) and are still marked as 'active'
-    if (appUserId && appUserId > 0) {
-      const updateResult = await sql`
-        UPDATE gym_passes
-        SET status = 'expired', updated_at = NOW()
-        WHERE (user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''})
-          AND status = 'active'
-          AND valid_until < ${now.toISOString()}
-        RETURNING id
-      `
-      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.length || 0)
-    } else {
-      const updateResult = await sql`
-        UPDATE gym_passes
-        SET status = 'expired', updated_at = NOW()
-        WHERE user_id = ${auth0Id || ''}
-          AND status = 'active'
-          AND valid_until < ${now.toISOString()}
-        RETURNING id
-      `
-      console.log('[updateExpiredPasses] Updated expired passes:', updateResult.length || 0)
+    const response = await fetch('https://api.any-gym.com/user/passes', {
+      headers: {
+        'auth0_id': trimmedAuth0Id,
+      },
+      next: { revalidate: 60 } // Cache for 1 minute
+    })
+    
+    console.log('[fetchUserPassesFromAPI] Response status:', response.status, response.statusText)
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log('[fetchUserPassesFromAPI] No passes found (404)')
+        return { passes: [], subscription: null }
+      }
+      throw new Error(`Failed to fetch passes: ${response.statusText}`)
     }
+
+    const data = await response.json()
+    console.log('[fetchUserPassesFromAPI] API response keys:', Object.keys(data))
+    console.log('[fetchUserPassesFromAPI] Subscription in response:', data.subscription)
+    
+    // Extract subscription from response if available
+    const subscriptionData = data.subscription || null
+    
+    // Handle both array and object with passes property
+    // API returns: { "subscription": {...}, "active_passes": [...], "pass_history": [...] }
+    // Combine active_passes and pass_history into one array
+    const passesData = Array.isArray(data) 
+      ? data 
+      : [
+          ...(data.active_passes || []),
+          ...(data.pass_history || []),
+          ...(data.passes || [])
+        ]
+    
+    console.log('[fetchUserPassesFromAPI] Total passes found:', passesData.length)
+    
+    // Map API response to GymPass type
+    // API structure: passes have gym_name, gym_id, gym_chain_id, gym_chain_name, gym_chain_logo directly on the object
+    const mappedPasses = passesData.map((pass: any) => {
+      // Map gym data - API has gym_name directly on pass object, not nested
+      let gymData = pass.gym
+      
+      // If no nested gym object, create one from flat pass data
+      if (!gymData && pass.gym_name) {
+        gymData = {
+          id: pass.gym_id,
+          name: pass.gym_name, // Use gym_name directly from pass object
+          address: '',
+          city: '',
+          postcode: '',
+          phone: undefined,
+          latitude: undefined,
+          longitude: undefined,
+          gym_chain_id: pass.gym_chain_id,
+          required_tier: 'standard',
+          amenities: [],
+          opening_hours: {},
+          image_url: undefined,
+          rating: undefined,
+          status: 'active',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      } else if (pass.gym) {
+        // If nested gym object exists, use it
+        gymData = {
+          id: pass.gym.id,
+          name: pass.gym.name,
+          address: pass.gym.address || '',
+          city: pass.gym.city || '',
+          postcode: pass.gym.postcode || '',
+          phone: pass.gym.phone,
+          latitude: pass.gym.latitude ? parseFloat(pass.gym.latitude) : undefined,
+          longitude: pass.gym.longitude ? parseFloat(pass.gym.longitude) : undefined,
+          gym_chain_id: pass.gym.gym_chain_id,
+          required_tier: pass.gym.required_tier || 'standard',
+          amenities: pass.gym.amenities || [],
+          opening_hours: pass.gym.opening_hours || {},
+          image_url: pass.gym.image_url,
+          rating: pass.gym.rating,
+          status: pass.gym.status || 'active',
+          createdAt: pass.gym.created_at ? new Date(pass.gym.created_at) : new Date(),
+          updatedAt: pass.gym.updated_at ? new Date(pass.gym.updated_at) : new Date(),
+        }
+      }
+      
+      return {
+        id: pass.id,
+        userId: pass.user_id || pass.auth0_id || auth0Id,
+        gymId: pass.gym_id,
+        passCode: pass.pass_code || pass.passCode || '',
+        status: pass.status || 'active',
+        validUntil: pass.valid_until ? new Date(pass.valid_until) : pass.validUntil ? new Date(pass.validUntil) : new Date(),
+        usedAt: pass.used_at ? new Date(pass.used_at) : pass.usedAt ? new Date(pass.usedAt) : undefined,
+        qrCodeUrl: pass.qrcode_url || pass.qr_code_url || pass.qrCodeUrl, // API uses qrcode_url
+        subscriptionTier: pass.subscription_tier || pass.subscriptionTier,
+        passCost: pass.pass_cost ? parseFloat(pass.pass_cost) : pass.passCost,
+        createdAt: pass.created_at ? new Date(pass.created_at) : pass.createdAt ? new Date(pass.createdAt) : new Date(),
+        updatedAt: pass.updated_at ? new Date(pass.updated_at) : pass.updatedAt ? new Date(pass.updatedAt) : new Date(),
+        gym: gymData,
+      } as GymPass
+    })
+    
+    return { passes: mappedPasses, subscription: subscriptionData }
   } catch (error) {
-    console.error('[updateExpiredPasses] Error updating expired passes:', error)
-    // Don't throw - allow the function to continue even if update fails
+    console.error('[fetchUserPassesFromAPI] Error fetching passes:', error)
+    return { passes: [], subscription: null }
   }
 }
 
 async function getActivePasses(appUserId: number | null, auth0Id?: string): Promise<GymPass[]> {
   try {
-    console.log('[getActivePasses] Fetching active passes for appUserId:', appUserId)
-    console.log('[getActivePasses] appUserId type:', typeof appUserId)
-    console.log('[getActivePasses] auth0Id:', auth0Id)
-    
-    // Update expired passes before fetching active ones
-    await updateExpiredPasses(appUserId, auth0Id)
-    
-    // First, check if any passes exist for this user at all
-    // Use direct string comparison - don't cast if user_id is already text
-    let allPassesCheck
-    if (appUserId && appUserId > 0) {
-      allPassesCheck = await sql`
-        SELECT COUNT(*) as count FROM gym_passes 
-        WHERE user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''}
-      `
-    } else {
-      allPassesCheck = await sql`
-        SELECT COUNT(*) as count FROM gym_passes 
-        WHERE user_id = ${auth0Id || ''}
-      `
-    }
-    console.log('[getActivePasses] Total passes for user:', allPassesCheck[0]?.count)
-    
-    const now = new Date()
-    console.log('[getActivePasses] Current time:', now.toISOString())
-    
-    // Query with both numeric ID and Auth0 ID string
-    // Use direct comparison without casting if possible
-    let result
-    if (appUserId && appUserId > 0) {
-      result = await sql`
-        SELECT 
-          gp.*,
-          json_build_object(
-            'id', g.id,
-            'name', g.name,
-            'address', g.address,
-            'city', g.city,
-            'postcode', g.postcode,
-            'phone', g.phone,
-            'gym_chain_id', g.gym_chain_id
-          ) as gym
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        WHERE (gp.user_id::text = ${appUserId}::text OR gp.user_id = ${auth0Id || ''})
-          AND gp.status = 'active'
-          AND gp.valid_until > ${now.toISOString()}
-        ORDER BY gp.created_at DESC
-      `
-    } else {
-      result = await sql`
-        SELECT 
-          gp.*,
-          json_build_object(
-            'id', g.id,
-            'name', g.name,
-            'address', g.address,
-            'city', g.city,
-            'postcode', g.postcode,
-            'phone', g.phone,
-            'gym_chain_id', g.gym_chain_id
-          ) as gym
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        WHERE gp.user_id = ${auth0Id || ''}
-          AND gp.status = 'active'
-          AND gp.valid_until > ${now.toISOString()}
-        ORDER BY gp.created_at DESC
-      `
-    }
-    
-    console.log('[getActivePasses] Query result length:', result?.length || 0)
-    if (result && result.length > 0) {
-      console.log('[getActivePasses] First result:', JSON.stringify(result[0], null, 2))
-    }
-    
-    if (!result || result.length === 0) {
-      console.log('[getActivePasses] No active passes found')
+    if (!auth0Id) {
+      console.log('[getActivePasses] No auth0Id provided')
       return []
     }
+
+    console.log('[getActivePasses] Fetching active passes for auth0Id:', auth0Id)
     
-    return result.map((row: any) => {
-      // Parse JSON object if it's a string
-      let gym = row.gym
-      if (typeof gym === 'string') {
-        try {
-          gym = JSON.parse(gym)
-        } catch (e) {
-          gym = null
-        }
-      }
-      
-      // Handle null/undefined gym
-      if (!gym && row.gym_id) {
-        gym = {
-          id: row.gym_id,
-          name: 'Unknown Gym',
-        }
-      }
-      
-      return {
-        id: row.id,
-        userId: row.user_id,
-        gymId: row.gym_id,
-        passCode: row.pass_code || '',
-        status: row.status || 'unknown',
-        validUntil: row.valid_until ? new Date(row.valid_until) : new Date(),
-        usedAt: row.used_at ? new Date(row.used_at) : undefined,
-        qrCodeUrl: row.qr_code_url,
-        subscriptionTier: row.subscription_tier,
-        passCost: row.pass_cost ? parseFloat(String(row.pass_cost)) : undefined,
-        createdAt: row.created_at ? new Date(row.created_at) : new Date(),
-        updatedAt: row.updated_at ? new Date(row.updated_at) : new Date(),
-        gym: gym,
-      }
-    }) as GymPass[]
+    // Fetch all passes from API (this also returns subscription data)
+    const { passes: allPasses } = await fetchUserPassesFromAPI(auth0Id)
+    
+    // Filter for active passes (status is 'active' and valid_until is in the future)
+    const now = new Date()
+    const activePasses = allPasses.filter((pass) => {
+      const isValid = pass.status === 'active' && pass.validUntil > now
+      return isValid
+    })
+    
+    console.log('[getActivePasses] Total passes:', allPasses.length, 'Active passes:', activePasses.length)
+    
+    // Sort by created date (most recent first)
+    activePasses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    
+    return activePasses
   } catch (error) {
-    console.error('Error fetching active passes:', error)
+    console.error('[getActivePasses] Error fetching active passes:', error)
     return []
   }
 }
 
-async function getPassesInBillingPeriod(
-  appUserId: number | null,
-  startDate: Date,
-  nextBillingDate: Date,
-  auth0Id?: string
-): Promise<number> {
-  try {
-    console.log('[getPassesInBillingPeriod] Query params:', {
-      appUserId,
-      auth0Id,
-      startDate: startDate.toISOString(),
-      nextBillingDate: nextBillingDate.toISOString(),
-    })
-    
-    let result
-    if (appUserId && appUserId > 0) {
-      result = await sql`
-        SELECT COUNT(*) as count
-        FROM gym_passes
-        WHERE (user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''})
-          AND created_at >= ${startDate.toISOString()}
-          AND created_at < ${nextBillingDate.toISOString()}
-      `
-    } else {
-      result = await sql`
-        SELECT COUNT(*) as count
-        FROM gym_passes
-        WHERE user_id = ${auth0Id || ''}
-          AND created_at >= ${startDate.toISOString()}
-          AND created_at < ${nextBillingDate.toISOString()}
-      `
-    }
-    
-    console.log('[getPassesInBillingPeriod] Query result:', result)
-    
-    if (!result || result.length === 0) {
-      console.log('[getPassesInBillingPeriod] No result, returning 0')
-      return 0
-    }
-    
-    const row = result[0]
-    if (!row) {
-      console.log('[getPassesInBillingPeriod] No row in result, returning 0')
-      return 0
-    }
-    
-    // Neon returns count as a string or number, handle both
-    const countValue = row.count
-    if (countValue === null || countValue === undefined) {
-      console.log('[getPassesInBillingPeriod] Count is null/undefined, returning 0')
-      return 0
-    }
-    
-    // Convert to number
-    const passCount = Number(countValue)
-    const finalCount = isNaN(passCount) ? 0 : passCount
-    console.log('[getPassesInBillingPeriod] Count:', finalCount, 'raw count:', countValue, 'type:', typeof countValue)
-    
-    // Only do additional debugging in development and if count is 0
-    if (process.env.NODE_ENV === 'development' && finalCount === 0 && auth0Id) {
-      try {
-        const totalPassesResult = await sql`
-          SELECT COUNT(*) as total_count FROM gym_passes WHERE user_id = ${auth0Id.trim()}
-        `
-        console.log('[getPassesInBillingPeriod] Total passes for user:', totalPassesResult[0]?.total_count)
-        
-        // Check passes with created_at dates for debugging
-        const allPassesWithDates = await sql`
-          SELECT id, created_at, user_id FROM gym_passes WHERE user_id = ${auth0Id.trim()} ORDER BY created_at DESC LIMIT 5
-        `
-        console.log('[getPassesInBillingPeriod] Sample passes with dates:', JSON.stringify(allPassesWithDates, null, 2))
-      } catch (debugError) {
-        console.warn('[getPassesInBillingPeriod] Debug query failed (non-fatal):', debugError)
-      }
-    }
-    
-    return finalCount
-  } catch (error) {
-    console.error('Error counting passes in billing period:', error)
-    return 0
-  }
-}
 
 async function getAllUserPasses(appUserId: number | null, auth0Id?: string) {
   try {
-    console.log('[getAllUserPasses] Fetching all passes for appUserId:', appUserId)
-    console.log('[getAllUserPasses] appUserId type:', typeof appUserId)
-    console.log('[getAllUserPasses] auth0Id:', auth0Id)
-    
-    // First, check raw passes without joins to see if they exist
-    let rawPassesCheck
-    if (appUserId && appUserId > 0) {
-      rawPassesCheck = await sql`
-        SELECT id, user_id, gym_id, status, created_at FROM gym_passes 
-        WHERE user_id::text = ${appUserId}::text OR user_id = ${auth0Id || ''}
-        LIMIT 5
-      `
-    } else {
-      rawPassesCheck = await sql`
-        SELECT id, user_id, gym_id, status, created_at FROM gym_passes 
-        WHERE user_id = ${auth0Id || ''}
-        LIMIT 5
-      `
-    }
-    console.log('[getAllUserPasses] Raw passes check:', JSON.stringify(rawPassesCheck, null, 2))
-    
-    let result
-    if (appUserId && appUserId > 0) {
-      result = await sql`
-        SELECT 
-          gp.*,
-          g.id as gym_id_col,
-          g.name as gym_name,
-          g.gym_chain_id as gym_chain_id_col,
-          gc.id as chain_id,
-          gc.name as chain_name,
-          gc.logo_url as chain_logo_url
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-        WHERE (gp.user_id::text = ${appUserId}::text OR gp.user_id = ${auth0Id || ''})
-        ORDER BY gp.created_at DESC
-        LIMIT 100
-      `
-    } else {
-      result = await sql`
-        SELECT 
-          gp.*,
-          g.id as gym_id_col,
-          g.name as gym_name,
-          g.gym_chain_id as gym_chain_id_col,
-          gc.id as chain_id,
-          gc.name as chain_name,
-          gc.logo_url as chain_logo_url
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-        WHERE gp.user_id = ${auth0Id || ''}
-        ORDER BY gp.created_at DESC
-        LIMIT 100
-      `
-    }
-    
-    console.log('[getAllUserPasses] Query result length:', result?.length || 0)
-    if (result && result.length > 0) {
-      console.log('[getAllUserPasses] First result:', JSON.stringify(result[0], null, 2))
-    }
-    
-    if (!result || result.length === 0) {
-      console.log('[getAllUserPasses] No passes found')
+    if (!auth0Id) {
+      console.log('[getAllUserPasses] No auth0Id provided')
       return []
     }
+
+    console.log('[getAllUserPasses] Fetching all passes for auth0Id:', auth0Id)
     
-    return result.map((row: any) => {
-      const gym = row.gym_id_col ? {
-        id: row.gym_id_col,
-        name: row.gym_name || 'Unknown Gym',
-        gym_chain_id: row.gym_chain_id_col,
-      } : null
-      
-      const chain = row.chain_id ? {
-        id: row.chain_id,
-        name: row.chain_name,
-        logo_url: row.chain_logo_url,
-      } : null
-      
-      return {
-        id: row.id,
-        userId: row.user_id,
-        gymId: row.gym_id,
-        passCode: row.pass_code || '',
-        status: row.status || 'unknown',
-        validUntil: row.valid_until ? new Date(row.valid_until) : new Date(),
-        usedAt: row.used_at ? new Date(row.used_at) : undefined,
-        qrCodeUrl: row.qr_code_url,
-        subscriptionTier: row.subscription_tier,
-        passCost: row.pass_cost ? parseFloat(String(row.pass_cost)) : undefined,
-        createdAt: row.created_at ? new Date(row.created_at) : new Date(),
-        updatedAt: row.updated_at ? new Date(row.updated_at) : new Date(),
-        gym: gym || undefined,
-      } as GymPass
-    })
+    // Fetch all passes from API (this also returns subscription data)
+    const { passes: allPasses } = await fetchUserPassesFromAPI(auth0Id)
+    
+    console.log('[getAllUserPasses] Total passes:', allPasses.length)
+    
+    // Sort by created date (most recent first)
+    allPasses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    
+    return allPasses
   } catch (error) {
-    console.error('Error fetching all user passes:', error)
+    console.error('[getAllUserPasses] Error fetching all user passes:', error)
     return []
   }
 }
 
 async function getPassHistory(appUserId: number | null, auth0Id?: string) {
   try {
-    console.log('[getPassHistory] Fetching pass history for appUserId:', appUserId)
-    console.log('[getPassHistory] appUserId type:', typeof appUserId)
-    console.log('[getPassHistory] auth0Id:', auth0Id)
-    
-    // Update expired passes before fetching history
-    await updateExpiredPasses(appUserId, auth0Id)
-    
-    const now = new Date()
-    let result
-    if (appUserId && appUserId > 0) {
-      result = await sql`
-        SELECT 
-          gp.*,
-          g.id as gym_id_col,
-          g.name as gym_name,
-          g.gym_chain_id as gym_chain_id_col,
-          gc.id as chain_id,
-          gc.name as chain_name,
-          gc.logo_url as chain_logo_url
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-        WHERE (gp.user_id::text = ${appUserId}::text OR gp.user_id = ${auth0Id || ''})
-          AND (gp.valid_until < ${now.toISOString()} OR gp.status = 'expired' OR gp.status = 'used')
-        ORDER BY gp.created_at DESC
-        LIMIT 100
-      `
-    } else {
-      result = await sql`
-        SELECT 
-          gp.*,
-          g.id as gym_id_col,
-          g.name as gym_name,
-          g.gym_chain_id as gym_chain_id_col,
-          gc.id as chain_id,
-          gc.name as chain_name,
-          gc.logo_url as chain_logo_url
-        FROM gym_passes gp
-        JOIN gyms g ON gp.gym_id = g.id
-        LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-        WHERE gp.user_id = ${auth0Id || ''}
-          AND (gp.valid_until < ${now.toISOString()} OR gp.status = 'expired' OR gp.status = 'used')
-        ORDER BY gp.created_at DESC
-        LIMIT 100
-      `
-    }
-    
-    console.log('[getPassHistory] Query result length:', result?.length || 0)
-    if (result && result.length > 0) {
-      console.log('[getPassHistory] First result:', JSON.stringify(result[0], null, 2))
-    }
-    
-    if (!result || result.length === 0) {
-      console.log('[getPassHistory] No results found, returning empty array')
+    if (!auth0Id) {
+      console.log('[getPassHistory] No auth0Id provided')
       return []
     }
+
+    console.log('[getPassHistory] Fetching pass history for auth0Id:', auth0Id)
+    
+    // Fetch all passes from API (this also returns subscription data)
+    // We need to also get raw pass data to access gym_chain_name and gym_chain_logo
+    const response = await fetch('https://api.any-gym.com/user/passes', {
+      headers: {
+        'auth0_id': auth0Id.trim(),
+      },
+      next: { revalidate: 60 }
+    })
+    
+    if (!response.ok) {
+      console.log('[getPassHistory] Failed to fetch passes')
+      return []
+    }
+    
+    const rawData = await response.json()
+    const rawPassHistory = rawData.pass_history || []
+    const rawPassMap = new Map(rawPassHistory.map((p: any) => [p.id, p]))
+    
+    // Get mapped passes
+    const { passes: allPasses } = await fetchUserPassesFromAPI(auth0Id)
+    
+    // Filter for historical passes (expired or used)
+    const now = new Date()
+    const historyPasses = allPasses.filter((pass) => {
+      const isExpired = pass.validUntil < now
+      const isUsed = pass.status === 'used'
+      const isExpiredStatus = pass.status === 'expired'
+      return isExpired || isUsed || isExpiredStatus
+    })
+    
+    console.log('[getPassHistory] Total passes:', allPasses.length, 'History passes:', historyPasses.length)
     
     // Group passes by gym
     const grouped: Record<number, any> = {}
     
-    console.log('[getPassHistory] Processing', result.length, 'rows')
-    
-    result.forEach((row: any, index: number) => {
-      console.log(`[getPassHistory] Processing row ${index}:`, {
-        id: row.id,
-        gym_id: row.gym_id,
-        gym_id_col: row.gym_id_col,
-        gym_name: row.gym_name,
-        status: row.status,
-        created_at: row.created_at,
-        used_at: row.used_at,
-      })
-      
-      const gymId = row.gym_id
+    historyPasses.forEach((pass) => {
+      const gymId = pass.gymId
       if (!gymId) {
-        console.log(`[getPassHistory] Skipping row ${index} - no gym_id`)
         return // Skip if no gym_id
       }
       
       if (!grouped[gymId]) {
+        // Extract chain info from raw API pass data - API includes gym_chain_name and gym_chain_logo directly on pass
+        const rawPass = rawPassMap.get(pass.id)
+        const chainId = rawPass?.gym_chain_id || pass.gym?.gym_chain_id
+        const chainName = rawPass?.gym_chain_name || pass.gym?.name
+        const chainLogo = rawPass?.gym_chain_logo || pass.gym?.logo_url
+        
         grouped[gymId] = {
-          gym: {
-            id: row.gym_id_col || gymId,
-            name: row.gym_name || 'Unknown Gym',
-            gym_chain_id: row.gym_chain_id_col,
+          gym: pass.gym || {
+            id: gymId,
+            name: rawPass?.gym_name || 'Unknown Gym',
+            gym_chain_id: chainId,
           },
-          chain: row.chain_id ? {
-            id: row.chain_id,
-            name: row.chain_name,
-            logo_url: row.chain_logo_url,
+          chain: chainId && chainName ? {
+            id: chainId,
+            name: chainName,
+            logo_url: chainLogo,
           } : null,
           passes: [],
         }
-        console.log(`[getPassHistory] Created new group for gym ${gymId}:`, grouped[gymId].gym)
       }
       
-      const createdAt = row.created_at ? new Date(row.created_at) : new Date()
-      const usedAt = row.used_at ? new Date(row.used_at) : null
-      
       const passData = {
-        id: row.id,
-        createdAt: createdAt,
-        usedAt: usedAt,
-        status: row.status || 'unknown',
-        subscriptionTier: row.subscription_tier,
+        id: pass.id,
+        createdAt: pass.createdAt,
+        usedAt: pass.usedAt || null,
+        status: pass.status,
+        subscriptionTier: pass.subscriptionTier,
       }
       
       grouped[gymId].passes.push(passData)
-      console.log(`[getPassHistory] Added pass to gym ${gymId}:`, passData)
     })
     
-    console.log('[getPassHistory] Grouped data:', JSON.stringify(grouped, null, 2))
-    console.log('[getPassHistory] Number of groups:', Object.keys(grouped).length)
-    
+    // Convert grouped object to array and calculate visit counts
     const finalResult = Object.values(grouped).map((group: any) => {
       const passes = group.passes || []
       const dates = passes
@@ -733,7 +578,6 @@ async function getPassHistory(appUserId: number | null, auth0Id?: string) {
       }
     })
     
-    console.log('[getPassHistory] Final result:', JSON.stringify(finalResult, null, 2))
     console.log('[getPassHistory] Returning', finalResult.length, 'groups')
     
     return finalResult
@@ -777,134 +621,7 @@ export default async function PassesPage() {
   let appUserId: number | null = null
   
   try {
-    // Check what users exist in app_users table for debugging (only in development, optional)
-    if (process.env.NODE_ENV === 'development') {
-      try {
-        const allUsers = await sql`
-          SELECT id, auth0_id, email, full_name FROM app_users 
-          ORDER BY created_at DESC 
-          LIMIT 10
-        `
-        console.log('[PassesPage] Sample users in app_users table:', JSON.stringify(allUsers, null, 2))
-      } catch (error) {
-        console.warn('[PassesPage] Could not check app_users table (non-fatal):', error)
-      }
-    }
-    
     appUserId = await getAppUserId(auth0Id, userEmail, userName)
-    
-    // If still not found, try to find user_id from passes table directly
-    // This handles the case where passes were created with Auth0 ID as user_id
-    if (!appUserId) {
-      console.log('[PassesPage] User not found by auth0_id, trying to find via passes table...')
-      try {
-        // First, check if passes exist with Auth0 ID as user_id
-        const passesWithAuth0Id = await sql`
-          SELECT DISTINCT user_id, COUNT(*) as pass_count
-          FROM gym_passes 
-          WHERE user_id::text = ${auth0Id.trim()}
-          GROUP BY user_id
-          LIMIT 1
-        `
-        console.log('[PassesPage] Passes with Auth0 ID as user_id:', JSON.stringify(passesWithAuth0Id, null, 2))
-        
-        if (passesWithAuth0Id.length > 0) {
-          // Passes exist with Auth0 ID - we need to create the user or find them
-          console.log('[PassesPage] Found passes with Auth0 ID, creating user in app_users...')
-          
-          // Try to create the user
-          try {
-            const insertResult = await sql`
-              INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
-              VALUES (${auth0Id.trim()}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
-              RETURNING id
-            `
-            
-            if (insertResult.length > 0) {
-              appUserId = insertResult[0].id
-              console.log('[PassesPage] Created user in app_users with ID:', appUserId)
-              
-              // Now try to update the passes to use the numeric user_id instead of Auth0 ID
-              // This will only work if user_id column can accept integers
-              try {
-                // First check the column type
-                const columnInfo = await sql`
-                  SELECT data_type 
-                  FROM information_schema.columns 
-                  WHERE table_name = 'gym_passes' AND column_name = 'user_id'
-                `
-                console.log('[PassesPage] gym_passes.user_id column type:', JSON.stringify(columnInfo, null, 2))
-                
-                // Try to update - if user_id is integer, cast appUserId to integer
-                // If it's text, keep it as text
-                if (columnInfo.length > 0 && columnInfo[0].data_type === 'integer') {
-                  const updateResult = await sql`
-                    UPDATE gym_passes 
-                    SET user_id = ${appUserId}
-                    WHERE user_id::text = ${auth0Id.trim()}
-                  `
-                  console.log('[PassesPage] Updated passes to use integer user_id')
-                } else {
-                  // Column is text/varchar, update as text
-                  const updateResult = await sql`
-                    UPDATE gym_passes 
-                    SET user_id = ${appUserId}::text
-                    WHERE user_id::text = ${auth0Id.trim()}
-                  `
-                  console.log('[PassesPage] Updated passes to use text user_id')
-                }
-              } catch (updateError: any) {
-                console.error('[PassesPage] Error updating passes user_id:', updateError?.message)
-                // Continue anyway - passes will still work with Auth0 ID in queries
-              }
-            }
-          } catch (insertError: any) {
-            // If unique constraint violation, user was created concurrently
-            if (insertError?.code === '23505' || insertError?.message?.includes('unique')) {
-              console.log('[PassesPage] User was created concurrently, fetching...')
-              const userResult = await sql`
-                SELECT id FROM app_users 
-                WHERE auth0_id = ${auth0Id.trim()}
-                LIMIT 1
-              `
-              if (userResult.length > 0) {
-                appUserId = userResult[0].id
-                console.log('[PassesPage] Found user after concurrent creation:', appUserId)
-              }
-            } else {
-              console.error('[PassesPage] Error creating user:', insertError?.message)
-            }
-          }
-        } else if (userEmail) {
-          // Try to find user by email in app_users
-          console.log('[PassesPage] Trying to find user by email...')
-          const emailResult = await sql`
-            SELECT id FROM app_users 
-            WHERE email = ${userEmail}
-            LIMIT 1
-          `
-          
-          if (emailResult.length > 0) {
-            appUserId = emailResult[0].id
-            console.log('[PassesPage] Found user by email, updating auth0_id...')
-            
-            // Update auth0_id
-            try {
-              await sql`
-                UPDATE app_users 
-                SET auth0_id = ${auth0Id.trim()}, updated_at = NOW()
-                WHERE id = ${appUserId}
-              `
-              console.log('[PassesPage] Updated auth0_id for user found by email')
-            } catch (updateError: any) {
-              console.error('[PassesPage] Error updating auth0_id:', updateError?.message)
-            }
-          }
-        }
-      } catch (passError: any) {
-        console.error('[PassesPage] Error finding user via passes:', passError?.message)
-      }
-    }
   } catch (error: any) {
     console.error('[PassesPage] Error in getAppUserId:', {
       message: error?.message,
@@ -914,55 +631,10 @@ export default async function PassesPage() {
     // Continue to show error page instead of crashing
   }
   
-  // If no appUserId found, check if passes exist with Auth0 ID directly
-  // If they do, we can still display passes even without app_users entry
-  if (!appUserId) {
-    console.log('[PassesPage] No appUserId found, checking if passes exist with Auth0 ID...')
-    
-    // Check if passes exist with this Auth0 ID
-    try {
-      const passesCheck = await sql`
-        SELECT COUNT(*) as count FROM gym_passes 
-        WHERE user_id::text = ${auth0Id.trim()}
-      `
-      const passCount = passesCheck[0]?.count ? Number(passesCheck[0].count) : 0
-      console.log('[PassesPage] Passes found with Auth0 ID:', passCount)
-      
-      if (passCount > 0) {
-        // Passes exist, create user entry now
-        console.log('[PassesPage] Passes exist, creating user entry...')
-        try {
-          const createUserResult = await sql`
-            INSERT INTO app_users (auth0_id, email, full_name, created_at, updated_at)
-            VALUES (${auth0Id.trim()}, ${userEmail || null}, ${userName || null}, NOW(), NOW())
-            RETURNING id
-          `
-          
-          if (createUserResult.length > 0) {
-            appUserId = createUserResult[0].id
-            console.log('[PassesPage] Created user with ID:', appUserId)
-          }
-        } catch (createError: any) {
-          // If unique constraint, fetch existing user
-          if (createError?.code === '23505' || createError?.message?.includes('unique')) {
-            const existingUser = await sql`
-              SELECT id FROM app_users WHERE auth0_id = ${auth0Id.trim()} LIMIT 1
-            `
-            if (existingUser.length > 0) {
-              appUserId = existingUser[0].id
-              console.log('[PassesPage] Found existing user:', appUserId)
-            }
-          } else {
-            console.error('[PassesPage] Error creating user:', createError?.message)
-          }
-        }
-      }
-    } catch (checkError: any) {
-      console.error('[PassesPage] Error checking passes:', checkError?.message)
-    }
-  }
+  // Note: We no longer check the database for passes since all data comes from API
+  // The getAppUserId function handles user creation via API if needed
   
-  // If no appUserId but we have Auth0 ID, we can still query passes
+  // If no appUserId but we have Auth0 ID, we can still query passes via API
   // Only show error if we have neither
   if (!appUserId && !auth0Id) {
     console.error('[PassesPage] No app user found and no Auth0 ID available')
@@ -980,83 +652,86 @@ export default async function PassesPage() {
     )
   }
   
-  // If we have Auth0 ID but no appUserId, log it but continue
+  // If we have Auth0 ID but no appUserId, log it but continue (API uses auth0Id)
   if (!appUserId && auth0Id) {
-    console.warn('[PassesPage] No appUserId found, but using Auth0 ID for pass queries:', auth0Id)
+    console.warn('[PassesPage] No appUserId found, but using Auth0 ID for API queries:', auth0Id)
   }
   
   console.log('[PassesPage] App User ID:', appUserId)
-  console.log('[PassesPage] App User ID type:', typeof appUserId)
   console.log('[PassesPage] Auth0 ID:', auth0Id)
   console.log('[PassesPage] ==========================================')
   
-  // Verify the user_id exists in app_users (if we have one) - only in development
-  if (appUserId && process.env.NODE_ENV === 'development') {
-    try {
-      const userVerify = await sql`
-        SELECT id, auth0_id, email FROM app_users WHERE id = ${appUserId}
-      `
-      console.log('[PassesPage] Verified user in app_users:', JSON.stringify(userVerify, null, 2))
-    } catch (verifyError: any) {
-      console.warn('[PassesPage] Error verifying user (non-fatal):', verifyError?.message)
-    }
-  }
-  
-  // Check what user_ids exist in gym_passes for debugging (only in development)
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const passUserIds = await sql`
-        SELECT DISTINCT user_id, COUNT(*) as pass_count 
-        FROM gym_passes 
-        GROUP BY user_id 
-        ORDER BY pass_count DESC 
-        LIMIT 10
-      `
-      console.log('[PassesPage] Sample user_ids in gym_passes:', JSON.stringify(passUserIds, null, 2))
-      
-      // Check if passes exist with Auth0 ID
-      if (auth0Id) {
-        const passesByAuth0Id = await sql`
-          SELECT id, user_id, gym_id, status, created_at 
-          FROM gym_passes 
-          WHERE user_id::text = ${auth0Id.trim()}
-          LIMIT 5
-        `
-        console.log('[PassesPage] Passes with auth0_id as user_id:', JSON.stringify(passesByAuth0Id, null, 2))
-      }
-      
-      // Check if passes exist with numeric user_id (if we have one)
-      if (appUserId) {
-        const passesForThisUser = await sql`
-          SELECT id, user_id, gym_id, status, created_at 
-          FROM gym_passes 
-          WHERE user_id::text = ${appUserId}::text
-          LIMIT 5
-        `
-        console.log('[PassesPage] Passes with numeric user_id:', JSON.stringify(passesForThisUser, null, 2))
-      }
-    } catch (verifyError: any) {
-      console.warn('[PassesPage] Error checking passes (non-fatal):', verifyError?.message)
-    }
-  }
-  
   try {
-    // Get subscription - try with both appUserId and auth0Id
-    const subscription = await getUserSubscription(appUserId, auth0Id)
-    console.log('[PassesPage] Subscription:', subscription)
-    if (subscription) {
-      console.log('[PassesPage] Subscription details:', {
-        id: subscription.id,
-        tier: subscription.tier,
+    // Fetch passes first - the /user/passes endpoint also returns subscription data
+    // This subscription data has the correct visits_used value
+    const { passes: allPassesFromAPI, subscription: subscriptionFromPasses } = await fetchUserPassesFromAPI(auth0Id)
+    console.log('[PassesPage] Subscription from /user/passes:', subscriptionFromPasses)
+    
+    // Try to get subscription from /user/passes response first (has correct visits_used)
+    // Fall back to /user/subscription endpoint if not available
+    let subscription: Subscription | null = null
+    
+    if (subscriptionFromPasses) {
+      console.log('[PassesPage] Using subscription from /user/passes response')
+      // Map the subscription from passes response using the same mapping logic
+      const subscriptionData = subscriptionFromPasses
+      
+      // Parse next_billing_date
+      let nextBillingDate: Date
+      if (subscriptionData.next_billing_date) {
+        const billingDateStr = subscriptionData.next_billing_date
+        if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
+          nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
+        } else {
+          nextBillingDate = new Date(billingDateStr)
+        }
+      } else {
+        nextBillingDate = subscriptionData.current_period_end 
+          ? new Date(subscriptionData.current_period_end)
+          : new Date()
+      }
+      
+      subscription = {
+        id: subscriptionData.id || 0,
+        userId: subscriptionData.user_id || auth0Id,
+        tier: subscriptionData.tier || 'standard',
+        monthlyLimit: subscriptionData.monthly_limit != null ? Number(subscriptionData.monthly_limit) : 0,
+        visitsUsed: subscriptionData.visits_used != null ? Number(subscriptionData.visits_used) : 0,
+        price: subscriptionData.price != null ? parseFloat(subscriptionData.price) : 0,
+        startDate: subscriptionData.start_date 
+          ? new Date(subscriptionData.start_date)
+          : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+        nextBillingDate: nextBillingDate,
+        currentPeriodStart: subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date(),
+        currentPeriodEnd: subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date(),
+        status: subscriptionData.status || 'active',
+        stripeSubscriptionId: subscriptionData.stripe_subscription_id || undefined,
+        stripeCustomerId: subscriptionData.stripe_customer_id || undefined,
+        guestPassesLimit: subscriptionData.guest_passes_limit != null ? Number(subscriptionData.guest_passes_limit) : 0,
+        guestPassesUsed: subscriptionData.guest_passes_used != null ? Number(subscriptionData.guest_passes_used) : 0,
+        createdAt: subscriptionData.created_at 
+          ? new Date(subscriptionData.created_at)
+          : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
+        updatedAt: subscriptionData.updated_at 
+          ? new Date(subscriptionData.updated_at)
+          : (subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date()),
+      } as Subscription
+      
+      console.log('[PassesPage] Mapped subscription from passes:', {
+        visitsUsed: subscription.visitsUsed,
         monthlyLimit: subscription.monthlyLimit,
-        monthlyLimitType: typeof subscription.monthlyLimit,
-        startDate: subscription.startDate,
-        nextBillingDate: subscription.nextBillingDate,
-        status: subscription.status,
+        tier: subscription.tier,
       })
+    } else {
+      console.log('[PassesPage] No subscription in /user/passes response, trying /user/subscription')
+      // Fall back to separate subscription endpoint
+      subscription = await getUserSubscription(appUserId, auth0Id)
     }
     
-    // Get passes - use Auth0 ID if appUserId is null
+    console.log('[PassesPage] Final subscription:', subscription)
+    console.log('[PassesPage] Subscription visitsUsed:', subscription?.visitsUsed)
+    
+    // Get passes - filter from the fetched passes
     const activePasses = await getActivePasses(appUserId || 0, auth0Id)
     console.log('[PassesPage] Active passes:', activePasses.length, activePasses)
     
@@ -1065,47 +740,6 @@ export default async function PassesPage() {
     
     const passHistory = await getPassHistory(appUserId || 0, auth0Id)
     console.log('[PassesPage] Pass history result:', passHistory.length, passHistory)
-    
-    // Get count of passes created in current billing period
-    let passesInBillingPeriod = 0
-    if (subscription && subscription.startDate && subscription.nextBillingDate) {
-      try {
-        // Ensure dates are valid Date objects
-        const startDate = subscription.startDate instanceof Date 
-          ? subscription.startDate 
-          : new Date(subscription.startDate)
-        const nextBillingDate = subscription.nextBillingDate instanceof Date 
-          ? subscription.nextBillingDate 
-          : new Date(subscription.nextBillingDate)
-        
-        if (!isNaN(startDate.getTime()) && !isNaN(nextBillingDate.getTime())) {
-          passesInBillingPeriod = await getPassesInBillingPeriod(
-            appUserId || null,
-            startDate,
-            nextBillingDate,
-            auth0Id
-          )
-          console.log('[PassesPage] Passes in billing period:', passesInBillingPeriod, 'from', startDate.toISOString(), 'to', nextBillingDate.toISOString())
-        }
-      } catch (error) {
-        console.error('Error getting passes in billing period:', error)
-        passesInBillingPeriod = 0
-      }
-    } else {
-      // If no subscription, count all passes created (for display purposes)
-      try {
-        if (auth0Id) {
-          const allPassesCount = await sql`
-            SELECT COUNT(*) as count FROM gym_passes 
-            WHERE user_id = ${auth0Id.trim()}
-          `
-          passesInBillingPeriod = allPassesCount[0]?.count ? Number(allPassesCount[0].count) : 0
-          console.log('[PassesPage] No subscription, counting all passes:', passesInBillingPeriod)
-        }
-      } catch (error) {
-        console.error('Error counting all passes:', error)
-      }
-    }
 
     // Get user initials for avatar
     const userName = session.user.name || session.user.email || 'User'
@@ -1136,7 +770,6 @@ export default async function PassesPage() {
                   subscription={subscription}
                   activePasses={activePasses}
                   passHistory={passHistory}
-                  passesInBillingPeriod={passesInBillingPeriod}
                 />
           </div>
         </div>

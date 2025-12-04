@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,35 +12,33 @@ export async function GET() {
 
     const auth0Id = session.user.sub
 
-    const result = await sql`
-      SELECT 
-        full_name,
-        date_of_birth,
-        address_line1,
-        address_line2,
-        address_city,
-        address_postcode,
-        emergency_contact_name,
-        emergency_contact_number
-      FROM app_users
-      WHERE auth0_id = ${auth0Id}
-      LIMIT 1
-    `
+    // Fetch user data from external API
+    const response = await fetch('https://api.any-gym.com/user', {
+      headers: {
+        'auth0_id': auth0Id,
+      },
+      next: { revalidate: 60 } // Cache for 1 minute
+    })
 
-    if (result.length === 0) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (!response.ok) {
+      if (response.status === 404) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
+      throw new Error(`Failed to fetch user: ${response.statusText}`)
     }
 
-    const user = result[0]
+    const userData = await response.json()
+    
+    // Map API response to expected format
     return NextResponse.json({
-      fullName: user.full_name || '',
-      dateOfBirth: user.date_of_birth || '',
-      addressLine1: user.address_line1 || '',
-      addressLine2: user.address_line2 || '',
-      addressCity: user.address_city || '',
-      addressPostcode: user.address_postcode || '',
-      emergencyContactName: user.emergency_contact_name || '',
-      emergencyContactNumber: user.emergency_contact_number || '',
+      fullName: userData.full_name || userData.name || '',
+      dateOfBirth: userData.date_of_birth || '',
+      addressLine1: userData.address_line1 || '',
+      addressLine2: userData.address_line2 || '',
+      addressCity: userData.address_city || '',
+      addressPostcode: userData.address_postcode || '',
+      emergencyContactName: userData.emergency_contact_name || '',
+      emergencyContactNumber: userData.emergency_contact_number || '',
     })
   } catch (error: any) {
     console.error('[Profile API] Error fetching profile:', error)
@@ -79,20 +76,30 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    await sql`
-      UPDATE app_users
-      SET 
-        full_name = ${fullName},
-        date_of_birth = ${dateOfBirth},
-        address_line1 = ${addressLine1},
-        address_line2 = ${addressLine2 || null},
-        address_city = ${addressCity},
-        address_postcode = ${addressPostcode},
-        emergency_contact_name = ${emergencyContactName},
-        emergency_contact_number = ${emergencyContactNumber},
-        updated_at = NOW()
-      WHERE auth0_id = ${auth0Id}
-    `
+    // Update user data via external API
+    const response = await fetch('https://api.any-gym.com/user', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'auth0_id': auth0Id,
+      },
+      body: JSON.stringify({
+        full_name: fullName,
+        name: fullName,
+        date_of_birth: dateOfBirth,
+        address_line1: addressLine1,
+        address_line2: addressLine2 || null,
+        address_city: addressCity,
+        address_postcode: addressPostcode,
+        emergency_contact_name: emergencyContactName,
+        emergency_contact_number: emergencyContactNumber,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to update user' }))
+      throw new Error(errorData.error || `Failed to update user: ${response.statusText}`)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
