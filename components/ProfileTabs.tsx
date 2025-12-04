@@ -33,6 +33,36 @@ export default function ProfileTabs({
   products,
   searchParams,
 }: ProfileTabsProps) {
+  // Debug logging for subscription prop
+  useEffect(() => {
+    console.log('[ProfileTabs] ===== SUBSCRIPTION PROP DEBUG =====')
+    console.log('[ProfileTabs] Subscription prop received:', subscription)
+    console.log('[ProfileTabs] Subscription is null?', subscription === null)
+    console.log('[ProfileTabs] Subscription is undefined?', subscription === undefined)
+    console.log('[ProfileTabs] Subscription type:', typeof subscription)
+    if (subscription) {
+      console.log('[ProfileTabs] Subscription tier:', subscription.tier)
+      console.log('[ProfileTabs] Subscription monthlyLimit:', subscription.monthlyLimit)
+      console.log('[ProfileTabs] Subscription visitsUsed:', subscription.visitsUsed)
+      try {
+        // Safe serialization (handles Date objects that become strings in Next.js)
+        const serialized = JSON.stringify(subscription, (key, value) => {
+          if (value instanceof Date) {
+            return value.toISOString()
+          }
+          return value
+        }, 2)
+        console.log('[ProfileTabs] Full subscription object:', serialized)
+      } catch (error) {
+        console.error('[ProfileTabs] Error serializing subscription:', error)
+        console.log('[ProfileTabs] Subscription (raw):', subscription)
+      }
+    } else {
+      console.warn('[ProfileTabs] ⚠️ SUBSCRIPTION PROP IS NULL OR UNDEFINED!')
+    }
+    console.log('[ProfileTabs] ===== END DEBUG =====')
+  }, [subscription])
+
   const [activeTab, setActiveTab] = useState<'profile' | 'subscription'>(
     searchParams?.tab === 'subscription' ? 'subscription' : 'profile'
   )

@@ -51,14 +51,32 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
   const [loading, setLoading] = useState<string | null>(null)
   const router = useRouter()
 
-  // Debug logging
+  // Debug logging - force all logs to appear
   useEffect(() => {
-    console.log('[SubscriptionManager] Products received:', products)
-    console.log('[SubscriptionManager] Products count:', products?.length || 0)
-    if (products && products.length === 0) {
-      console.warn('[SubscriptionManager] No products received from server')
+    // Force console output even if subscription is null
+    console.log('==========================================')
+    console.log('[SubscriptionManager] DEBUG START')
+    console.log('==========================================')
+    
+    // Log subscription with explicit null check
+    if (subscription === null) {
+      console.log('[SubscriptionManager] ❌ SUBSCRIPTION IS NULL')
+    } else if (subscription === undefined) {
+      console.log('[SubscriptionManager] ❌ SUBSCRIPTION IS UNDEFINED')
+    } else {
+      console.log('[SubscriptionManager] ✅ SUBSCRIPTION EXISTS')
+      console.log('[SubscriptionManager] Subscription prop:', subscription)
+      console.log('[SubscriptionManager] Subscription type:', typeof subscription)
+      console.log('[SubscriptionManager] Subscription tier:', subscription?.tier)
+      console.log('[SubscriptionManager] Subscription monthlyLimit:', subscription?.monthlyLimit)
+      console.log('[SubscriptionManager] Subscription visitsUsed:', subscription?.visitsUsed)
     }
-  }, [products])
+    
+    console.log('[SubscriptionManager] Products count:', products?.length || 0)
+    console.log('==========================================')
+    console.log('[SubscriptionManager] DEBUG END')
+    console.log('==========================================')
+  }, [subscription, products])
 
   const handleSwitchPlan = async (priceId: string | undefined) => {
     if (!priceId) {
@@ -146,7 +164,28 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
   }
 
   const getTierDisplayName = (tier: string) => {
+    if (!tier) {
+      console.warn('[SubscriptionManager] getTierDisplayName called with empty tier')
+      return 'Standard'
+    }
     return tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase()
+  }
+
+  // Safe serialization helper (handles Date objects that become strings in Next.js)
+  const safeStringify = (obj: any): string => {
+    try {
+      if (obj === null) return 'null'
+      if (obj === undefined) return 'undefined'
+      return JSON.stringify(obj, (key, value) => {
+        // Date objects are already strings when passed from server
+        if (value instanceof Date) {
+          return value.toISOString()
+        }
+        return value
+      }, 2)
+    } catch (error) {
+      return `[Error serializing: ${error}]`
+    }
   }
 
   const currentTier = subscription?.tier?.toLowerCase() || null
