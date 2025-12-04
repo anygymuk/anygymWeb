@@ -189,12 +189,28 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
   }
 
   const currentTier = subscription?.tier?.toLowerCase() || null
-  const nextBillingDate = subscription?.nextBillingDate
-    ? new Date(subscription.nextBillingDate).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
+  
+  // Format dates (handle both Date objects and strings from Next.js serialization)
+  const formatDate = (date: Date | string | undefined): string | null => {
+    if (!date) return null
+    try {
+      const dateObj = date instanceof Date ? date : new Date(date)
+      if (isNaN(dateObj.getTime())) return null
+      return dateObj.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
         year: 'numeric',
       })
+    } catch {
+      return null
+    }
+  }
+  
+  const nextBillingDate = formatDate(subscription?.nextBillingDate)
+  const currentPeriodStart = formatDate(subscription?.currentPeriodStart)
+  const currentPeriodEnd = formatDate(subscription?.currentPeriodEnd)
+  const currentPeriod = currentPeriodStart && currentPeriodEnd 
+    ? `${currentPeriodStart} - ${currentPeriodEnd}`
     : null
 
   return (
@@ -205,18 +221,20 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
             Your Current Plan
           </h2>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-700 dark:text-gray-300 mb-2">
-                You have an active <span className="font-semibold">{getTierDisplayName(subscription.tier)}</span> membership.
-                {nextBillingDate && (
-                  <span> Your next billing date is on {nextBillingDate}.</span>
-                )}
+          <div>
+            <p className="text-gray-700 dark:text-gray-300 mb-2">
+              You have an active <span className="font-semibold">{getTierDisplayName(subscription.tier)}</span> membership.
+            </p>
+            {currentPeriod && (
+              <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">
+                Current Period: {currentPeriod}
               </p>
-            </div>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-              {getTierDisplayName(subscription.tier)}
-            </span>
+            )}
+            {nextBillingDate && (
+              <p className="text-gray-600 dark:text-gray-400 text-sm">
+                Next billing date: {nextBillingDate}
+              </p>
+            )}
           </div>
           <button
             onClick={handleCancelMembership}
