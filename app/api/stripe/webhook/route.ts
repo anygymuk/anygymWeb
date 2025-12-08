@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe'
-import { sql } from '@/lib/db'
 import Stripe from 'stripe'
 import sgMail from '@sendgrid/mail'
 import { haversineDistance, getCoordinatesFromPostcode } from '@/lib/geocoding'
@@ -100,178 +99,7 @@ async function handleOtherEvents(event: Stripe.Event) {
       console.log('📋 Subscription ID:', subscription.id)
       console.log('📋 Subscription status:', subscription.status)
       console.log('📋 Customer ID:', subscription.customer)
-      console.log('📋 current_period_end:', subscription.current_period_end)
-      console.log('📋 Subscription items count:', subscription.items.data.length)
-
-      // Get customer to find auth0_id
-      let auth0Id: string | null = null
-      try {
-        const customer = await stripe.customers.retrieve(subscription.customer as string)
-        if (!customer.deleted) {
-          const customerObj = customer as Stripe.Customer
-          auth0Id = customerObj.metadata?.auth0_id || customerObj.metadata?.user_id || null
-          console.log('📋 Found auth0_id from customer metadata:', auth0Id)
-        }
-      } catch (customerError: any) {
-        console.error('❌ Error retrieving customer:', customerError.message)
-      }
-
-      // If we have auth0_id and subscription is active, cancel other active subscriptions for this user
-      if (auth0Id && subscription.status === 'active') {
-        const trimmedAuth0Id = auth0Id.trim()
-        console.log('🔄 Canceling other active subscriptions for user:', trimmedAuth0Id)
-        const canceledOthers = await sql`
-          UPDATE subscriptions 
-          SET status = 'canceled', updated_at = NOW()
-          WHERE user_id = ${trimmedAuth0Id} 
-          AND status = 'active'
-          AND stripe_subscription_id != ${subscription.id}
-          RETURNING id
-        `
-        console.log(`✅ Canceled ${canceledOthers.length} other active subscription(s) for user`)
-      }
-
-      // Get subscription details from the first item (price/product)
-      let tier = 'standard'
-      let monthlyLimit = 8
-      let guestPassesLimit = 0
-      let price = 0
-
-      if (subscription.items.data.length > 0) {
-        const subscriptionItem = subscription.items.data[0]
-        const priceId = subscriptionItem.price.id
-        
-        try {
-          // Retrieve price and product to get metadata
-          const priceObj = await stripe.prices.retrieve(priceId)
-          const product = await stripe.products.retrieve(priceObj.product as string)
-          
-          // Determine tier from product metadata or name
-          if (product.metadata?.tierGyms) {
-            tier = product.metadata.tierGyms
-          } else {
-            const name = product.name.toLowerCase()
-            if (name.includes('premium')) {
-              tier = 'premium'
-            } else if (name.includes('elite')) {
-              tier = 'elite'
-            }
-          }
-          
-          // Get limits from product metadata
-          monthlyLimit = parseInt(product.metadata?.['Gym Passes'] || '8', 10)
-          guestPassesLimit = parseInt(product.metadata?.['Guest Passes'] || '0', 10)
-          
-          // Get price amount
-          if (priceObj.unit_amount) {
-            price = priceObj.unit_amount / 100
-          }
-          
-          console.log('📋 Updated tier:', tier)
-          console.log('📋 Updated monthly_limit:', monthlyLimit)
-          console.log('📋 Updated guest_passes_limit:', guestPassesLimit)
-          console.log('📋 Updated price:', price)
-        } catch (productError: any) {
-          console.warn('⚠️ Could not retrieve product details:', productError.message)
-          // Continue with existing values from database
-        }
-      }
-
-      // Validate current_period_end before creating date
-      let dateString: string | null = null
-      if (subscription.current_period_end && typeof subscription.current_period_end === 'number') {
-        const nextBillingDate = new Date(subscription.current_period_end * 1000)
-        
-        // Validate the date is valid
-        if (!isNaN(nextBillingDate.getTime())) {
-          dateString = nextBillingDate.toISOString().split('T')[0]
-          console.log('📅 Next billing date:', dateString)
-        } else {
-          console.error('❌ Invalid date created from current_period_end:', subscription.current_period_end)
-        }
-      } else {
-        console.warn('⚠️ No valid current_period_end in subscription')
-      }
-
-      // Handle cancellation - if status is canceled, mark as canceled in DB
-      const dbStatus = subscription.status === 'canceled'
-        ? 'canceled' 
-        : subscription.status
-
-      // Check if subscription exists in database
-      const existingSub = await sql`
-        SELECT id, user_id FROM subscriptions
-        WHERE stripe_subscription_id = ${subscription.id}
-        LIMIT 1
-      `
-
-      if (existingSub.length > 0) {
-        // Update existing subscription
-        if (dateString) {
-          await sql`
-            UPDATE subscriptions
-            SET 
-              status = ${dbStatus},
-              tier = ${tier},
-              monthly_limit = ${monthlyLimit},
-              guest_passes_limit = ${guestPassesLimit},
-              price = ${price},
-              next_billing_date = ${dateString},
-              updated_at = NOW()
-            WHERE stripe_subscription_id = ${subscription.id}
-          `
-          console.log('✅ Updated subscription in database (with all fields)')
-        } else {
-          await sql`
-            UPDATE subscriptions
-            SET 
-              status = ${dbStatus},
-              tier = ${tier},
-              monthly_limit = ${monthlyLimit},
-              guest_passes_limit = ${guestPassesLimit},
-              price = ${price},
-              updated_at = NOW()
-            WHERE stripe_subscription_id = ${subscription.id}
-          `
-          console.log('✅ Updated subscription in database (without date)')
-        }
-      } else if (auth0Id && subscription.status === 'active') {
-        // Subscription doesn't exist in DB but is active - create it
-        // This can happen if webhook order is wrong or subscription was created outside normal flow
-        console.log('⚠️ Subscription not found in DB, creating new record...')
-        const startDate = new Date(subscription.current_period_start * 1000)
-        const nextBillingDate = subscription.current_period_end 
-          ? new Date(subscription.current_period_end * 1000)
-          : new Date()
-        
-        await sql`
-          INSERT INTO subscriptions (
-            user_id, tier, monthly_limit, price, start_date, next_billing_date,
-            visits_used, status, stripe_subscription_id, stripe_customer_id,
-            guest_passes_limit, guest_passes_used, created_at, updated_at
-          ) VALUES (
-            ${auth0Id.trim()},
-            ${tier},
-            ${monthlyLimit},
-            ${price},
-            ${startDate.toISOString().split('T')[0]},
-            ${nextBillingDate.toISOString().split('T')[0]},
-            0,
-            'active',
-            ${subscription.id},
-            ${subscription.customer as string},
-            ${guestPassesLimit},
-            0,
-            NOW(),
-            NOW()
-          )
-        `
-        console.log('✅ Created missing subscription in database')
-      }
-      
-      if (dbStatus === 'canceled') {
-        console.log('⚠️ Subscription has been canceled')
-      }
+      console.log('ℹ️ Subscription management is handled by the API')
       break
     }
 
@@ -279,15 +107,7 @@ async function handleOtherEvents(event: Stripe.Event) {
       const subscription = event.data.object as Stripe.Subscription
       console.log('🗑️ Processing subscription.deleted event')
       console.log('📋 Subscription ID:', subscription.id)
-
-      await sql`
-        UPDATE subscriptions
-        SET 
-          status = 'canceled',
-          updated_at = NOW()
-        WHERE stripe_subscription_id = ${subscription.id}
-      `
-      console.log('✅ Marked subscription as canceled')
+      console.log('ℹ️ Subscription management is handled by the API')
       break
     }
 
@@ -353,26 +173,8 @@ async function processCheckoutSession(
       return
     }
 
-    // Store Stripe customer ID in app_users
-    await sql`
-      UPDATE app_users 
-      SET stripe_customer_id = ${session.customer as string}
-      WHERE auth0_id = ${auth0Id}
-    `
-    console.log('✅ Stored Stripe customer ID in app_users')
-
-    // Cancel any existing active subscriptions
-    const canceledCount = await sql`
-      UPDATE subscriptions 
-      SET status = 'canceled', updated_at = NOW()
-      WHERE user_id = ${auth0Id.trim()} 
-      AND status = 'active'
-      RETURNING id
-    `
-    console.log(`✅ Canceled ${canceledCount.length} existing subscription(s)`)
-    if (canceledCount.length > 0) {
-      console.log('📋 Canceled subscription IDs:', canceledCount.map((s: any) => s.id).join(', '))
-    }
+    // Subscription and user management is handled by the API
+    console.log('ℹ️ Subscription and user management is handled by the API')
 
     // Get subscription details from metadata
     const monthlyLimit = parseInt(session.metadata?.monthly_limit || '8', 10)
@@ -393,137 +195,14 @@ async function processCheckoutSession(
       ? new Date(subscription.current_period_end * 1000)
       : new Date()
 
-    // Log subscription data before insertion
-    console.log('📝 Subscription data to insert:')
-    console.log('  - user_id (auth0_id):', auth0Id)
-    console.log('  - tier:', tier)
-    console.log('  - monthly_limit:', monthlyLimit)
-    console.log('  - guest_passes_limit:', guestPassesLimit)
-    console.log('  - price:', price)
-    console.log('  - start_date:', startDate.toISOString().split('T')[0])
-    console.log('  - next_billing_date:', nextBillingDate.toISOString().split('T')[0])
-    console.log('  - stripe_subscription_id:', subscriptionId || null)
-    console.log('  - stripe_customer_id:', session.customer as string)
+    // Subscription creation is handled by the API
+    console.log('ℹ️ Subscription creation is handled by the API')
 
-    // Create new subscription in database
-    try {
-      // First verify the subscription doesn't already exist
-      const existingCheck = await sql`
-        SELECT id FROM subscriptions
-        WHERE stripe_subscription_id = ${subscriptionId || ''}
-        LIMIT 1
-      `
-      
-      if (existingCheck.length > 0) {
-        console.log('⚠️ Subscription already exists in database, updating instead...')
-        await sql`
-          UPDATE subscriptions
-          SET 
-            user_id = ${auth0Id.trim()},
-            tier = ${tier},
-            monthly_limit = ${monthlyLimit},
-            price = ${price},
-            start_date = ${startDate.toISOString().split('T')[0]},
-            next_billing_date = ${nextBillingDate.toISOString().split('T')[0]},
-            status = 'active',
-            stripe_customer_id = ${session.customer as string},
-            guest_passes_limit = ${guestPassesLimit},
-            updated_at = NOW()
-          WHERE stripe_subscription_id = ${subscriptionId || ''}
-        `
-        console.log('✅ Updated existing subscription in database')
-        
-        // Verify the update
-        const verifyUpdate = await sql`
-          SELECT id, user_id, status, stripe_subscription_id 
-          FROM subscriptions 
-          WHERE stripe_subscription_id = ${subscriptionId || ''}
-          LIMIT 1
-        `
-        console.log('🔍 Updated subscription verification:', JSON.stringify(verifyUpdate[0], null, 2))
-      } else {
-        const insertResult = await sql`
-          INSERT INTO subscriptions (
-            user_id, tier, monthly_limit, price, start_date, next_billing_date,
-            visits_used, status, stripe_subscription_id, stripe_customer_id,
-            guest_passes_limit, guest_passes_used, created_at, updated_at
-          ) VALUES (
-            ${auth0Id.trim()},
-            ${tier},
-            ${monthlyLimit},
-            ${price},
-            ${startDate.toISOString().split('T')[0]},
-            ${nextBillingDate.toISOString().split('T')[0]},
-            0,
-            'active',
-            ${subscriptionId || null},
-            ${session.customer as string},
-            ${guestPassesLimit},
-            0,
-            NOW(),
-            NOW()
-          )
-          RETURNING id
-        `
-        console.log('✅ Created subscription in database with ID:', insertResult[0]?.id)
-        
-        // Verify the subscription was created correctly
-        const verifyResult = await sql`
-          SELECT id, user_id, status, stripe_subscription_id 
-          FROM subscriptions 
-          WHERE id = ${insertResult[0]?.id}
-          LIMIT 1
-        `
-        console.log('🔍 Verification query result:', JSON.stringify(verifyResult[0], null, 2))
-        
-        // Also verify by user_id
-        const verifyByUserId = await sql`
-          SELECT id, user_id, status, stripe_subscription_id 
-          FROM subscriptions 
-          WHERE user_id = ${auth0Id.trim()}
-          AND status = 'active'
-          ORDER BY created_at DESC
-        `
-        console.log('🔍 Active subscriptions for user:', verifyByUserId.length)
-        verifyByUserId.forEach((sub: any, idx: number) => {
-          console.log(`  ${idx + 1}. ID: ${sub.id}, status: ${sub.status}, stripe_id: ${sub.stripe_subscription_id}, user_id: ${sub.user_id}`)
-        })
-      }
-    } catch (insertError: any) {
-      console.error('❌ Failed to create subscription in database:')
-      console.error('  Error message:', insertError?.message)
-      console.error('  Error code:', insertError?.code)
-      console.error('  Error detail:', insertError?.detail)
-      console.error('  Error hint:', insertError?.hint)
-      console.error('  Full error:', JSON.stringify(insertError, null, 2))
-      // Re-throw to ensure the error is logged but don't break the webhook
-      throw insertError
-    }
-
-    // Get user's postcode - try Stripe metadata first, then fall back to database
+    // Get user's postcode from Stripe metadata only
     let postcode = customerObj.metadata?.postcode || null
     console.log('📍 Postcode from Stripe metadata:', postcode)
-
-    // If no postcode in Stripe metadata, try to get it from app_users table
     if (!postcode) {
-      console.log('🔍 Postcode not in Stripe metadata, checking app_users table...')
-      try {
-        const userResult = await sql`
-          SELECT address_postcode 
-          FROM app_users 
-          WHERE auth0_id = ${auth0Id}
-          LIMIT 1
-        `
-        if (userResult.length > 0 && userResult[0].address_postcode) {
-          postcode = userResult[0].address_postcode
-          console.log('✅ Found postcode in database:', postcode)
-        } else {
-          console.log('⚠️ No postcode found in database either')
-        }
-      } catch (dbError: any) {
-        console.error('❌ Error fetching postcode from database:', dbError?.message)
-        // Continue without postcode - will use first 3 gyms
-      }
+      console.log('⚠️ No postcode in Stripe metadata - will use first 3 gyms')
     }
 
     let userCoords: { latitude: number; longitude: number } | null = null
@@ -546,19 +225,69 @@ async function processCheckoutSession(
       console.log('⚠️ No postcode available - cannot calculate distances')
     }
 
-    // Fetch gyms
-    console.log('🏋️ Fetching gyms from database...')
-    const gymsResult = await sql`
-      SELECT g.*, 
-             gc.name as chain_name,
-             gc.logo_url as chain_logo
-      FROM gyms g
-      LEFT JOIN gym_chains gc ON g.gym_chain_id = gc.id
-      WHERE g.status = 'active'
-        AND g.latitude IS NOT NULL
-        AND g.longitude IS NOT NULL
-    `
-    console.log('🏋️ Total gyms found:', gymsResult.length)
+    // Fetch gyms from API
+    console.log('🏋️ Fetching gyms from API...')
+    let gymsResult: any[] = []
+    
+    if (!auth0Id) {
+      console.error('❌ Cannot fetch gyms - no auth0_id available')
+    } else {
+      try {
+        const trimmedAuth0Id = auth0Id.trim()
+        const response = await fetch('https://api.any-gym.com/gyms', {
+          headers: {
+            'auth0_id': trimmedAuth0Id,
+          },
+          cache: 'no-store', // Don't cache for webhook
+        })
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch gyms: ${response.statusText}`)
+        }
+        
+        const data = await response.json()
+        
+        // Map API response to include chain_name and chain_logo
+        // Filter for active gyms with coordinates
+        gymsResult = (Array.isArray(data) ? data : [])
+          .filter((gym: any) => 
+            gym.latitude != null && 
+            gym.longitude != null &&
+            (gym.status === 'active' || gym.status === undefined) // Include active or undefined status
+          )
+          .map((gym: any) => {
+            // Extract chain_name and chain_logo from nested object or direct properties
+            const chain_name = gym.gym_chain?.name || gym.gym_chain_name || null
+            const chain_logo = gym.gym_chain?.logo_url || gym.gym_chain_logo || null
+            
+            return {
+              id: gym.id,
+              name: gym.name,
+              address: gym.address || '',
+              city: gym.city || '',
+              postcode: gym.postcode || '',
+              phone: gym.phone || undefined,
+              latitude: gym.latitude != null ? gym.latitude : null,
+              longitude: gym.longitude != null ? gym.longitude : null,
+              gym_chain_id: gym.gym_chain_id || undefined,
+              required_tier: gym.required_tier || 'standard',
+              amenities: gym.amenities || [],
+              opening_hours: gym.opening_hours || {},
+              image_url: gym.image_url || undefined,
+              status: gym.status || 'active',
+              chain_name: chain_name,
+              chain_logo: chain_logo,
+            }
+          })
+        
+        console.log('🏋️ Total gyms found:', gymsResult.length)
+      } catch (error: any) {
+        console.error('❌ Error fetching gyms from API:', error?.message)
+        console.error('❌ Error stack:', error?.stack)
+        // Continue with empty array - email will be skipped if no gyms
+        gymsResult = []
+      }
+    }
 
     let closestGyms: any[] = []
 
@@ -597,7 +326,7 @@ async function processCheckoutSession(
         console.log('⚠️ Using first 3 gyms (no user coordinates available)')
         console.log('📋 Selected gyms:', closestGyms.map((g: any) => `${g.name} (${g.id})`).join(', '))
       } else {
-        console.error('❌ No gyms found in database!')
+        console.error('❌ No gyms found from API!')
       }
     }
     

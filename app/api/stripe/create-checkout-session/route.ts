@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { stripe } from '@/lib/stripe'
-import { sql } from '@/lib/db'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -31,53 +30,70 @@ export async function POST(request: NextRequest) {
     // Get or create Stripe customer
     let customerId: string
 
-    // Check app_users table first
-    const userResult = await sql`
-      SELECT stripe_customer_id FROM app_users 
-      WHERE auth0_id = ${userId}
-      LIMIT 1
-    `
+    // Try to get stripe_customer_id from API
+    try {
+      const trimmedAuth0Id = userId.trim()
+      const userResponse = await fetch('https://api.any-gym.com/user', {
+        headers: {
+          'auth0_id': trimmedAuth0Id,
+        },
+        cache: 'no-store', // Don't cache for checkout session
+      })
 
-    if (userResult.length > 0 && userResult[0].stripe_customer_id) {
-      customerId = userResult[0].stripe_customer_id
-      // Update customer metadata to ensure auth0_id is set
-      try {
-        await stripe.customers.update(customerId, {
-          metadata: {
-            userId: userId,
-            auth0_id: userId,
-          },
-        })
-      } catch (updateError) {
-        console.warn('Failed to update customer metadata:', updateError)
+      if (userResponse.ok) {
+        const userData = await userResponse.json()
+        
+        // Check if user has stripe_customer_id in API response
+        if (userData.stripe_customer_id) {
+          customerId = userData.stripe_customer_id
+          
+          // Update customer metadata to ensure auth0_id is set
+          try {
+            await stripe.customers.update(customerId, {
+              metadata: {
+                userId: userId,
+                auth0_id: userId,
+              },
+            })
+          } catch (updateError) {
+            console.warn('[create-checkout-session] Failed to update customer metadata:', updateError)
+          }
+        }
       }
-    } else {
-      // Check subscriptions table as fallback
-      const subscriptionResult = await sql`
-        SELECT stripe_customer_id FROM subscriptions 
-        WHERE user_id = ${userId}
-        LIMIT 1
-      `
+    } catch (apiError: any) {
+      console.warn('[create-checkout-session] Error fetching user from API:', apiError?.message)
+      // Continue to create new customer below
+    }
 
-      if (subscriptionResult.length > 0 && subscriptionResult[0].stripe_customer_id) {
-        customerId = subscriptionResult[0].stripe_customer_id
-      } else {
-        // Create new Stripe customer
-        const customer = await stripe.customers.create({
-          email: userEmail || undefined,
-          metadata: {
-            userId: userId,
-            auth0_id: userId, // Also include as auth0_id for webhook compatibility
+    // If no customer ID found, create new Stripe customer
+    if (!customerId) {
+      console.log('[create-checkout-session] No existing customer found, creating new Stripe customer')
+      const customer = await stripe.customers.create({
+        email: userEmail || undefined,
+        metadata: {
+          userId: userId,
+          auth0_id: userId, // Also include as auth0_id for webhook compatibility
+        },
+      })
+      customerId = customer.id
+
+      // Update user in API with stripe_customer_id
+      try {
+        const trimmedAuth0Id = userId.trim()
+        await fetch('https://api.any-gym.com/user/update', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'auth0_id': trimmedAuth0Id,
           },
+          body: JSON.stringify({
+            stripe_customer_id: customerId,
+          }),
         })
-        customerId = customer.id
-
-        // Update app_users with stripe_customer_id
-        await sql`
-          UPDATE app_users 
-          SET stripe_customer_id = ${customerId}
-          WHERE auth0_id = ${userId}
-        `
+        console.log('[create-checkout-session] Updated user with stripe_customer_id via API')
+      } catch (updateError: any) {
+        console.warn('[create-checkout-session] Failed to update user with stripe_customer_id:', updateError?.message)
+        // Continue even if API update fails - webhook will handle it
       }
     }
 
@@ -85,6 +101,7 @@ export async function POST(request: NextRequest) {
     console.log('[create-checkout-session] Customer ID:', customerId)
     
     // Cancel any existing active subscriptions in Stripe before creating a new one
+    // Note: The webhook will handle updating subscription status in the API
     try {
       const existingSubscriptions = await stripe.subscriptions.list({
         customer: customerId,
@@ -96,19 +113,10 @@ export async function POST(request: NextRequest) {
         console.log(`[create-checkout-session] Found ${existingSubscriptions.data.length} active subscription(s), cancelling...`)
         for (const sub of existingSubscriptions.data) {
           try {
-            // Cancel in Stripe
+            // Cancel in Stripe - webhook will handle API updates
             await stripe.subscriptions.cancel(sub.id)
             console.log(`[create-checkout-session] Cancelled subscription in Stripe: ${sub.id}`)
-            
-            // Also update database immediately to avoid race conditions
-            await sql`
-              UPDATE subscriptions
-              SET 
-                status = 'canceled',
-                updated_at = NOW()
-              WHERE stripe_subscription_id = ${sub.id}
-            `
-            console.log(`[create-checkout-session] Marked subscription as canceled in database: ${sub.id}`)
+            console.log(`[create-checkout-session] Webhook will handle subscription status update in API`)
           } catch (cancelError: any) {
             console.error(`[create-checkout-session] Error cancelling subscription ${sub.id}:`, cancelError.message)
             // Continue with other subscriptions even if one fails

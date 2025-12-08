@@ -17,7 +17,6 @@ cp .env.example .env.local
 Then fill in:
 - **Auth0 credentials** from your Auth0 dashboard
 - **Stripe API keys** from your Stripe dashboard  
-- **Neon database connection string**
 - **Stripe Price ID** for your subscription product
 
 ### 2. Database Schema Compatibility

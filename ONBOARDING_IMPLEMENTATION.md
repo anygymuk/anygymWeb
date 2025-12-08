@@ -67,17 +67,11 @@ A migration script is provided at `migrations/add_onboarding_columns.sql`.
 
 ## Setup Instructions
 
-### 1. Run Database Migration
+### 1. Database Migration (Backend)
 
-Execute the migration script to add the required columns:
+The database schema migration should be handled by the backend API. The migration script `migrations/add_onboarding_columns.sql` is provided for reference. The frontend no longer connects directly to the database - all data operations go through `api.any-gym.com`.
 
-```bash
-# Connect to your database and run:
-psql $DATABASE_URL -f migrations/add_onboarding_columns.sql
-
-# Or using your database client, execute the SQL from:
-# migrations/add_onboarding_columns.sql
-```
+**Note**: If you need to run this migration, it should be executed on the backend database server, not from the frontend codebase.
 
 ### 2. Verify Implementation
 

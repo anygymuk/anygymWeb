@@ -56,9 +56,6 @@ Set these in Netlify Dashboard → Site settings → Environment variables:
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` - Stripe publishable key (starts with `pk_`)
 - `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret (starts with `whsec_`)
 
-### Database Variables
-- `DATABASE_URL` - Neon database connection string
-
 ### Optional Variables (for email and geocoding)
 - `SENDGRID_API_KEY` - SendGrid API key for sending emails (starts with `SG.`)
 - `SENDGRID_FROM_EMAIL` - Email address to send from

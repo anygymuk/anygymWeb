@@ -1,48 +1,10 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { sql } from '@/lib/db'
-import { Subscription } from '@/lib/types'
-import SubscriptionManager from '@/components/SubscriptionManager'
-import DashboardLayout from '@/components/DashboardLayout'
-import { StripeProduct } from '@/app/api/stripe/products/route'
 import { getOrCreateAppUser } from '@/lib/user'
+import { StripeProduct } from '@/app/api/stripe/products/route'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
-
-async function getUserSubscription(userId: string): Promise<Subscription | null> {
-  try {
-    const result = await sql`
-      SELECT * FROM subscriptions 
-      WHERE user_id = ${userId} 
-      ORDER BY created_at DESC
-      LIMIT 1
-    `
-    if (result.length === 0) return null
-    
-    const row = result[0]
-    return {
-      id: row.id,
-      userId: row.user_id,
-      tier: row.tier,
-      monthlyLimit: row.monthly_limit,
-      visitsUsed: row.visits_used,
-      price: parseFloat(row.price),
-      startDate: new Date(row.start_date),
-      nextBillingDate: new Date(row.next_billing_date),
-      status: row.status,
-      stripeSubscriptionId: row.stripe_subscription_id,
-      stripeCustomerId: row.stripe_customer_id,
-      guestPassesLimit: row.guest_passes_limit,
-      guestPassesUsed: row.guest_passes_used,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-    } as Subscription
-  } catch (error) {
-    console.error('Error fetching subscription:', error)
-    return null
-  }
-}
 
 async function getStripeProducts(): Promise<StripeProduct[]> {
   try {

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { sql } from '@/lib/db'
 import { Gym } from '@/lib/types'
 
 // Mark route as dynamic - uses cookies for authentication
@@ -57,65 +56,18 @@ export async function GET(
       updatedAt: new Date(),
     }
 
-    // Use gym_chain from API response if available, otherwise fetch from database
+    // Extract gym_chain from API response
     let gym_chain = null
     
     // Check if API response includes gym_chain object
     if (gymData.gym_chain) {
       gym_chain = gymData.gym_chain
-    } else if (gym.gym_chain_id) {
-      // Fallback to database if gym_chain not in API response
-      try {
-        const chainResult = await sql`
-          SELECT 
-            id,
-            name,
-            logo_url,
-            brand_color,
-            website,
-            description,
-            terms,
-            health_statement,
-            terms_url,
-            health_statement_url,
-            use_terms_url,
-            use_health_statement_url
-          FROM gym_chains
-          WHERE id = ${gym.gym_chain_id}
-        `
-        
-        if (chainResult.length > 0) {
-          const chainRow = chainResult[0]
-          gym_chain = {
-            id: chainRow.id,
-            name: chainRow.name,
-            logo_url: chainRow.logo_url || undefined,
-            brand_color: chainRow.brand_color,
-            website: chainRow.website,
-            description: chainRow.description,
-            terms: chainRow.terms,
-            health_statement: chainRow.health_statement,
-            terms_url: chainRow.terms_url,
-            health_statement_url: chainRow.health_statement_url,
-            use_terms_url: chainRow.use_terms_url,
-            use_health_statement_url: chainRow.use_health_statement_url,
-          }
-        } else {
-          // Fallback to basic chain info from API
-          gym_chain = {
-            id: gymData.gym_chain_id,
-            name: gymData.gym_chain_name || 'Unknown Chain',
-            logo_url: gymData.gym_chain_logo || undefined,
-          }
-        }
-      } catch (chainError) {
-        console.error('Error fetching chain from database:', chainError)
-        // Fallback to basic chain info from API
-        gym_chain = {
-          id: gymData.gym_chain_id,
-          name: gymData.gym_chain_name || 'Unknown Chain',
-          logo_url: gymData.gym_chain_logo || undefined,
-        }
+    } else if (gymData.gym_chain_id || gymData.gym_chain_name) {
+      // Use basic chain info from API response if available
+      gym_chain = {
+        id: gymData.gym_chain_id || null,
+        name: gymData.gym_chain_name || 'Unknown Chain',
+        logo_url: gymData.gym_chain_logo || undefined,
       }
     }
 

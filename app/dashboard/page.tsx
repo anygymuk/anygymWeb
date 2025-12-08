@@ -1,6 +1,5 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { sql } from '@/lib/db'
 import { Subscription, Gym } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import GymMapView from '@/components/GymMapView'
@@ -136,13 +135,32 @@ async function getAllGyms(): Promise<Gym[]> {
   }
 }
 
-async function getGymChains() {
+async function getGymChains(auth0Id: string) {
   try {
-    const result = await sql`
-      SELECT * FROM gym_chains 
-      ORDER BY name
-    `
-    return result
+    const trimmedAuth0Id = auth0Id.trim()
+    const response = await fetch('https://api.any-gym.com/chains', {
+      headers: {
+        'auth0_id': trimmedAuth0Id,
+      },
+      next: { revalidate: 3600 } // Cache for 1 hour (chains don't change often)
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch chains: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Ensure the response is an array and map to expected format
+    // API should return array of chains with id and name properties
+    const chains = Array.isArray(data) ? data : (data.chains || [])
+    
+    // Sort by name to match previous behavior
+    return chains.sort((a: any, b: any) => {
+      const nameA = a.name || ''
+      const nameB = b.name || ''
+      return nameA.localeCompare(nameB)
+    })
   } catch (error) {
     console.error('Error fetching chains:', error)
     return []
@@ -184,7 +202,7 @@ export default async function Dashboard() {
     const [userData, gyms, chains] = await Promise.allSettled([
       getUserData(auth0Id, session.user.email, session.user.name),
       getAllGyms(),
-      getGymChains(),
+      getGymChains(auth0Id),
     ])
 
     const userDataResult = userData.status === 'fulfilled' ? userData.value : { name: session.user.name || session.user.email || 'User', subscription: null }

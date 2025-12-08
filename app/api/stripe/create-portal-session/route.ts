@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { stripe } from '@/lib/stripe'
-import { sql } from '@/lib/db'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -16,28 +15,28 @@ export async function POST(request: NextRequest) {
 
     const userId = session.user.sub
 
-    // Check subscriptions table first
+    // Get stripe_customer_id from API
     let customerId: string | null = null
     
-    const subscriptionResult = await sql`
-      SELECT stripe_customer_id FROM subscriptions 
-      WHERE user_id = ${userId}
-      LIMIT 1
-    `
+    try {
+      const trimmedAuth0Id = userId.trim()
+      const userResponse = await fetch('https://api.any-gym.com/user', {
+        headers: {
+          'auth0_id': trimmedAuth0Id,
+        },
+        cache: 'no-store', // Don't cache for portal session
+      })
 
-    if (subscriptionResult.length > 0 && subscriptionResult[0].stripe_customer_id) {
-      customerId = subscriptionResult[0].stripe_customer_id
-    } else {
-      // Fallback to app_users table
-      const userResult = await sql`
-        SELECT stripe_customer_id FROM app_users 
-        WHERE auth0_id = ${userId}
-        LIMIT 1
-      `
-      
-      if (userResult.length > 0 && userResult[0].stripe_customer_id) {
-        customerId = userResult[0].stripe_customer_id
+      if (userResponse.ok) {
+        const userData = await userResponse.json()
+        customerId = userData.stripe_customer_id || null
+      } else if (userResponse.status === 404) {
+        console.log('[create-portal-session] User not found in API')
+      } else {
+        console.error('[create-portal-session] Error fetching user from API:', userResponse.status, userResponse.statusText)
       }
+    } catch (apiError: any) {
+      console.error('[create-portal-session] Error fetching user from API:', apiError?.message)
     }
 
     if (!customerId) {
