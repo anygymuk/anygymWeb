@@ -63,24 +63,47 @@ export default function GymMap({ gyms, selectedGym, onGymClick }: GymMapProps) {
     })
   }, [])
 
-  // Memoize selected marker icon - create once and reuse
+  // Create custom gym marker icon - orange pin with white circle and red/coral dumbbell
+  const gymMarkerIcon = useMemo(() => {
+    return L.divIcon({
+      html: `
+        <svg width="40" height="50" viewBox="0 0 40 50" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+          <!-- Orange teardrop pin shape -->
+          <path d="M20 0 C12 0 6 6 6 14 C6 20 20 40 20 40 C20 40 34 20 34 14 C34 6 28 0 20 0 Z" fill="#f97316"/>
+          <!-- White circle -->
+          <circle cx="20" cy="14" r="9" fill="white"/>
+          <!-- Red/coral dumbbell icon (Font Awesome style, scaled to fit within circle) -->
+          <g transform="translate(20, 14) scale(0.025) translate(-320, -320)">
+            <path d="M96 176C96 149.5 117.5 128 144 128C170.5 128 192 149.5 192 176L192 288L448 288L448 176C448 149.5 469.5 128 496 128C522.5 128 544 149.5 544 176L544 192L560 192C586.5 192 608 213.5 608 240L608 288C625.7 288 640 302.3 640 320C640 337.7 625.7 352 608 352L608 400C608 426.5 586.5 448 560 448L544 448L544 464C544 490.5 522.5 512 496 512C469.5 512 448 490.5 448 464L448 352L192 352L192 464C192 490.5 170.5 512 144 512C117.5 512 96 490.5 96 464L96 448L80 448C53.5 448 32 426.5 32 400L32 352C14.3 352 0 337.7 0 320C0 302.3 14.3 288 32 288L32 240C32 213.5 53.5 192 80 192L96 192L96 176z" fill="#ff6b6b"/>
+          </g>
+        </svg>
+      `,
+      className: 'custom-gym-marker',
+      iconSize: L.point(40, 50, true),
+      iconAnchor: L.point(20, 50, true),
+      popupAnchor: L.point(0, -50, true),
+    })
+  }, [])
+
+  // Memoize selected marker icon - create once and reuse (larger version with scale)
   const selectedMarkerIcon = useMemo(() => {
     return L.divIcon({
-      html: `<div style="
-        background-color: #f97316;
-        color: white;
-        border-radius: 50%;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 4px solid white;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-        transform: scale(1.2);
-      ">📍</div>`,
+      html: `
+        <svg width="48" height="60" viewBox="0 0 40 50" style="filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4)); transform: scale(1.2);">
+          <!-- Orange teardrop pin shape with white border -->
+          <path d="M20 0 C12 0 6 6 6 14 C6 20 20 40 20 40 C20 40 34 20 34 14 C34 6 28 0 20 0 Z" fill="#f97316" stroke="white" stroke-width="2"/>
+          <!-- White circle -->
+          <circle cx="20" cy="14" r="9" fill="white"/>
+          <!-- Red/coral dumbbell icon (Font Awesome style, scaled to fit within circle) -->
+          <g transform="translate(20, 14) scale(0.025) translate(-320, -320)">
+            <path d="M96 176C96 149.5 117.5 128 144 128C170.5 128 192 149.5 192 176L192 288L448 288L448 176C448 149.5 469.5 128 496 128C522.5 128 544 149.5 544 176L544 192L560 192C586.5 192 608 213.5 608 240L608 288C625.7 288 640 302.3 640 320C640 337.7 625.7 352 608 352L608 400C608 426.5 586.5 448 560 448L544 448L544 464C544 490.5 522.5 512 496 512C469.5 512 448 490.5 448 464L448 352L192 352L192 464C192 490.5 170.5 512 144 512C117.5 512 96 490.5 96 464L96 448L80 448C53.5 448 32 426.5 32 400L32 352C14.3 352 0 337.7 0 320C0 302.3 14.3 288 32 288L32 240C32 213.5 53.5 192 80 192L96 192L96 176z" fill="#ff6b6b"/>
+          </g>
+        </svg>
+      `,
       className: 'custom-selected-marker',
-      iconSize: L.point(32, 32, true),
+      iconSize: L.point(48, 60, true),
+      iconAnchor: L.point(24, 60, true),
+      popupAnchor: L.point(0, -60, true),
     })
   }, [])
 
@@ -117,6 +140,7 @@ export default function GymMap({ gyms, selectedGym, onGymClick }: GymMapProps) {
             <Marker
               key={`gym-${gym.id}`}
               position={[Number(gym.latitude), Number(gym.longitude)]}
+              icon={gymMarkerIcon}
               eventHandlers={{
                 click: () => {
                   if (onGymClick) {

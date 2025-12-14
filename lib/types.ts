@@ -54,3 +54,14 @@ export interface Subscription {
   updatedAt: Date
 }
 
+export interface Article {
+  id: string
+  title: string
+  headline?: string
+  excerpt?: string | null
+  slug?: string
+  published_date?: string | null
+  featured_image?: string
+  featured_image_alt?: string
+}
+

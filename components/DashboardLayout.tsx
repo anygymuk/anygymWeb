@@ -41,6 +41,15 @@ export default function DashboardLayout({
       ),
     },
     {
+      name: 'Explore',
+      href: '/explore',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      ),
+    },
+    {
       name: 'Profile',
       href: '/profile',
       icon: (
@@ -63,7 +72,9 @@ export default function DashboardLayout({
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2">
           {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href === '/dashboard' && pathname?.startsWith('/dashboard'))
+            const isActive = pathname === item.href || 
+              (item.href === '/dashboard' && pathname?.startsWith('/dashboard')) ||
+              (item.href === '/explore' && pathname?.startsWith('/explore'))
             return (
               <Link
                 key={item.href}
@@ -110,7 +121,9 @@ export default function DashboardLayout({
       <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 lg:hidden z-50">
         <div className="flex justify-around items-center h-16">
           {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href === '/dashboard' && pathname?.startsWith('/dashboard'))
+            const isActive = pathname === item.href || 
+              (item.href === '/dashboard' && pathname?.startsWith('/dashboard')) ||
+              (item.href === '/explore' && pathname?.startsWith('/explore'))
             return (
               <Link
                 key={item.href}

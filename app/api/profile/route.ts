@@ -39,6 +39,12 @@ export async function GET() {
       addressPostcode: userData.address_postcode || '',
       emergencyContactName: userData.emergency_contact_name || '',
       emergencyContactNumber: userData.emergency_contact_number || '',
+      passNotificationConsent: userData.pass_notification_consent === true || 
+                                userData.pass_notification_consent === 'true' || 
+                                userData.pass_notification_consent === 1,
+      marketingConsent: userData.marketing_consent === true || 
+                        userData.marketing_consent === 'true' || 
+                        userData.marketing_consent === 1,
     })
   } catch (error: any) {
     console.error('[Profile API] Error fetching profile:', error)
@@ -66,6 +72,8 @@ export async function PUT(request: NextRequest) {
       addressPostcode,
       emergencyContactName,
       emergencyContactNumber,
+      passNotificationConsent,
+      marketingConsent,
     } = await request.json()
 
     // Validate required fields
@@ -77,7 +85,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Build update body with only fields that have values (non-empty)
-    const updateBody: Record<string, string> = {}
+    const updateBody: Record<string, string | boolean> = {}
     
     if (fullName) {
       updateBody.full_name = fullName
@@ -103,6 +111,13 @@ export async function PUT(request: NextRequest) {
     }
     if (emergencyContactNumber) {
       updateBody.emergency_contact_number = emergencyContactNumber
+    }
+    // Handle boolean consent fields
+    if (typeof passNotificationConsent === 'boolean') {
+      updateBody.pass_notification_consent = passNotificationConsent
+    }
+    if (typeof marketingConsent === 'boolean') {
+      updateBody.marketing_consent = marketingConsent
     }
 
     // Update user data via external API

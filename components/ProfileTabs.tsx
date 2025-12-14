@@ -23,6 +23,8 @@ interface ProfileData {
   addressPostcode: string
   emergencyContactName: string
   emergencyContactNumber: string
+  passNotificationConsent: boolean
+  marketingConsent: boolean
 }
 
 export default function ProfileTabs({
@@ -80,6 +82,8 @@ export default function ProfileTabs({
     addressPostcode: '',
     emergencyContactName: '',
     emergencyContactNumber: '',
+    passNotificationConsent: false,
+    marketingConsent: false,
   })
 
   useEffect(() => {
@@ -94,7 +98,12 @@ export default function ProfileTabs({
         throw new Error('Failed to fetch profile data')
       }
       const data = await response.json()
-      setProfileData(data)
+      // Ensure boolean values are properly set
+      setProfileData({
+        ...data,
+        passNotificationConsent: data.passNotificationConsent === true || data.passNotificationConsent === 'true' || data.passNotificationConsent === 1,
+        marketingConsent: data.marketingConsent === true || data.marketingConsent === 'true' || data.marketingConsent === 1,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load profile')
     } finally {
@@ -213,190 +222,254 @@ export default function ProfileTabs({
                 )}
 
                 <div className="space-y-6">
-                  {/* Full Name */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Full Name <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.fullName}
-                        onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.fullName || 'Not set'}
-                      </p>
-                    )}
-                  </div>
+                  {/* Personal Details Section */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                      Personal Details
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Full Name */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Name <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.fullName}
+                            onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.fullName || 'Not set'}
+                          </p>
+                        )}
+                      </div>
 
-                  {/* Date of Birth */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Date of Birth <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="date"
-                        value={profileData.dateOfBirth}
-                        onChange={(e) => setProfileData({ ...profileData, dateOfBirth: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.dateOfBirth
-                          ? new Date(profileData.dateOfBirth).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'long',
-                              day: 'numeric',
-                            })
-                          : 'Not set'}
-                      </p>
-                    )}
-                  </div>
+                      {/* Email (read-only) */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Email
+                        </label>
+                        <p className="text-gray-900 dark:text-white">{userEmail}</p>
+                      </div>
 
-                  {/* Address Line 1 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Address Line 1 <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.addressLine1}
-                        onChange={(e) => setProfileData({ ...profileData, addressLine1: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.addressLine1 || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Address Line 2 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Address Line 2
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.addressLine2}
-                        onChange={(e) => setProfileData({ ...profileData, addressLine2: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.addressLine2 || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* City */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      City <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.addressCity}
-                        onChange={(e) => setProfileData({ ...profileData, addressCity: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.addressCity || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Postcode */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Postcode <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.addressPostcode}
-                        onChange={(e) => setProfileData({ ...profileData, addressPostcode: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.addressPostcode || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Emergency Contact Name */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Emergency Contact Name <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={profileData.emergencyContactName}
-                        onChange={(e) => setProfileData({ ...profileData, emergencyContactName: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.emergencyContactName || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Emergency Contact Number */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Emergency Contact Number <span className="text-red-500">*</span>
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="tel"
-                        value={profileData.emergencyContactNumber}
-                        onChange={(e) => setProfileData({ ...profileData, emergencyContactNumber: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
-                        required
-                      />
-                    ) : (
-                      <p className="text-gray-900 dark:text-white">
-                        {profileData.emergencyContactNumber || 'Not set'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Email (read-only) */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Email
-                    </label>
-                    <p className="text-gray-900 dark:text-white">{userEmail}</p>
-                  </div>
-
-                  {/* Membership (read-only) */}
-                  {subscription && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Membership
-                      </label>
-                      <p className="text-gray-900 dark:text-white">
-                        {subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1).toLowerCase()} Member
-                      </p>
+                      {/* Date of Birth */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Date of Birth <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="date"
+                            value={profileData.dateOfBirth}
+                            onChange={(e) => setProfileData({ ...profileData, dateOfBirth: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.dateOfBirth
+                              ? new Date(profileData.dateOfBirth).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })
+                              : 'Not set'}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
+
+                  {/* Address Section */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                      Address
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Address Line 1 */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Address Line 1 <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.addressLine1}
+                            onChange={(e) => setProfileData({ ...profileData, addressLine1: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.addressLine1 || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Address Line 2 */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Address Line 2
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.addressLine2}
+                            onChange={(e) => setProfileData({ ...profileData, addressLine2: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.addressLine2 || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* City */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          City <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.addressCity}
+                            onChange={(e) => setProfileData({ ...profileData, addressCity: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.addressCity || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Postcode */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Postcode <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.addressPostcode}
+                            onChange={(e) => setProfileData({ ...profileData, addressPostcode: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.addressPostcode || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Emergency Contact Section */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                      Emergency Contact
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Emergency Contact Name */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Emergency Contact Name <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={profileData.emergencyContactName}
+                            onChange={(e) => setProfileData({ ...profileData, emergencyContactName: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.emergencyContactName || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Emergency Contact Number */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Emergency Contact Number <span className="text-red-500">*</span>
+                        </label>
+                        {isEditing ? (
+                          <input
+                            type="tel"
+                            value={profileData.emergencyContactNumber}
+                            onChange={(e) => setProfileData({ ...profileData, emergencyContactNumber: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent"
+                            required
+                          />
+                        ) : (
+                          <p className="text-gray-900 dark:text-white">
+                            {profileData.emergencyContactNumber || 'Not set'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notification Preferences Section */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                      Notification Preferences
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Pass Notification Consent */}
+                      <div className="flex items-start">
+                        <div className="flex items-center h-5">
+                          <input
+                            type="checkbox"
+                            id="passNotificationConsent"
+                            checked={profileData.passNotificationConsent}
+                            onChange={(e) => setProfileData({ ...profileData, passNotificationConsent: e.target.checked })}
+                            disabled={!isEditing}
+                            className="w-4 h-4 text-[#FF6B6B] bg-gray-100 border-gray-300 rounded focus:ring-[#FF6B6B] focus:ring-2 dark:bg-gray-700 dark:border-gray-600 dark:focus:ring-[#FF6B6B] disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div className="ml-3 text-sm">
+                          <label htmlFor="passNotificationConsent" className={`font-medium ${isEditing ? 'text-gray-700 dark:text-gray-300 cursor-pointer' : 'text-gray-700 dark:text-gray-300'}`}>
+                            Pass Notifications
+                          </label>
+                          <p className="text-gray-500 dark:text-gray-400">
+                            Receive notifications about your gym passes
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Marketing Consent */}
+                      <div className="flex items-start">
+                        <div className="flex items-center h-5">
+                          <input
+                            type="checkbox"
+                            id="marketingConsent"
+                            checked={profileData.marketingConsent}
+                            onChange={(e) => setProfileData({ ...profileData, marketingConsent: e.target.checked })}
+                            disabled={!isEditing}
+                            className="w-4 h-4 text-[#FF6B6B] bg-gray-100 border-gray-300 rounded focus:ring-[#FF6B6B] focus:ring-2 dark:bg-gray-700 dark:border-gray-600 dark:focus:ring-[#FF6B6B] disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div className="ml-3 text-sm">
+                          <label htmlFor="marketingConsent" className={`font-medium ${isEditing ? 'text-gray-700 dark:text-gray-300 cursor-pointer' : 'text-gray-700 dark:text-gray-300'}`}>
+                            Marketing Communications
+                          </label>
+                          <p className="text-gray-500 dark:text-gray-400">
+                            Receive marketing emails and promotional offers
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Action Buttons */}
                   {isEditing && (
