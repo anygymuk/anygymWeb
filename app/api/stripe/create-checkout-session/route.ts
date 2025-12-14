@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get or create Stripe customer
-    let customerId: string
+    let customerId: string | undefined
 
     // Try to get stripe_customer_id from API
     try {
