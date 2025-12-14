@@ -44,12 +44,13 @@ export async function POST(request: NextRequest) {
         const userData = await userResponse.json()
         
         // Check if user has stripe_customer_id in API response
-        if (userData.stripe_customer_id) {
-          customerId = userData.stripe_customer_id
+        const existingCustomerId = userData.stripe_customer_id
+        if (existingCustomerId) {
+          customerId = existingCustomerId
           
           // Update customer metadata to ensure auth0_id is set
           try {
-            await stripe.customers.update(customerId, {
+            await stripe.customers.update(existingCustomerId, {
               metadata: {
                 userId: userId,
                 auth0_id: userId,
