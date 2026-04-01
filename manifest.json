@@ -1,0 +1,27 @@
+{
+  "name": "anygym",
+  "short_name": "anygym",
+  "description": "Unlock a world of fitness. Access hundreds of UK gyms with a single subscription. Find, book, and go with anygym.",
+  "icons": [
+    {
+      "src": "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/0ee5cc984_anygym-linkedin-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/0ee5cc984_anygym-linkedin-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "https://app.any-gym.com",
+  "display": "fullscreen",
+  "theme_color": "#000000",
+  "background_color": "#ffffff",
+  "scope": "https://app.any-gym.com",
+  "dir": "ltr",
+  "orientation": "portrait",
+  "categories": [
+    "fitness"
+  ]
+}
