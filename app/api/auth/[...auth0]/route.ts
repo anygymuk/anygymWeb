@@ -1,6 +1,6 @@
 import { handleAuth, handleLogin } from '@auth0/nextjs-auth0'
 
-export const GET = handleAuth({
+const auth0Route = handleAuth({
   login: handleLogin({
     returnTo: '/dashboard',
     authorizationParams: {
@@ -9,4 +9,7 @@ export const GET = handleAuth({
     },
   }),
 })
+
+export const GET = auth0Route
+export const POST = auth0Route
 
