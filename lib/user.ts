@@ -95,7 +95,7 @@ async function fetchUserFromApi(
  * Create or upsert a user record. The external API does not expose POST /user;
  * use PUT /user/update (upsert) then PUT /user as fallback.
  */
-async function upsertUserViaApi(
+export async function upsertUserViaApi(
   normalizedAuth0Id: string,
   userEmail?: string,
   userName?: string
@@ -251,7 +251,7 @@ export async function getOrCreateAppUser(
 export async function updateUserViaApi(
   auth0Id: string,
   payload: Record<string, unknown>
-): Promise<{ ok: boolean; error?: string; data?: unknown }> {
+): Promise<{ ok: boolean; error?: string; status?: number; data?: unknown }> {
   const normalizedAuth0Id = auth0Id.trim()
   const urls = [
     'https://api.any-gym.com/user/update',
@@ -259,33 +259,110 @@ export async function updateUserViaApi(
   ]
 
   let lastError = 'Failed to update user'
+  let lastStatus = 500
 
   for (const url of urls) {
-    const response = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        auth0_id: normalizedAuth0Id,
-      },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          auth0_id: normalizedAuth0Id,
+        },
+        body: JSON.stringify({
+          auth0_id: normalizedAuth0Id,
+          ...payload,
+        }),
+      })
 
-    if (response.ok) {
-      const data = await response.json().catch(() => ({}))
-      return { ok: true, data }
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}))
+        return { ok: true, data }
+      }
+
+      const errorData = await response.json().catch(() => ({}))
+      lastError =
+        (errorData as { error?: string; message?: string }).error ||
+        (errorData as { error?: string; message?: string }).message ||
+        `Failed to update user: ${response.statusText}`
+      lastStatus = response.status
+
+      console.warn(
+        `[updateUserViaApi] ${url} returned ${response.status}:`,
+        lastError
+      )
+
+      // Try the next endpoint for client/server errors that may be route-specific
+      if ([400, 404, 405, 422].includes(response.status)) {
+        continue
+      }
+
+      return { ok: false, error: lastError, status: lastStatus }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[updateUserViaApi] ${url} failed:`, message)
+      lastError = message
     }
-
-    const errorData = await response.json().catch(() => ({}))
-    lastError =
-      (errorData as { error?: string }).error ||
-      `Failed to update user: ${response.statusText}`
-
-    if (response.status === 404) {
-      continue
-    }
-
-    return { ok: false, error: lastError }
   }
 
-  return { ok: false, error: lastError }
+  return { ok: false, error: lastError, status: lastStatus }
+}
+
+/**
+ * Save onboarding profile fields, then mark onboarding complete in a separate call
+ * so /user/update (partial update) is not rejected for unsupported fields.
+ */
+export async function saveOnboardingViaApi(
+  auth0Id: string,
+  profile: {
+    email?: string
+    name: string
+    dateOfBirth: string
+    addressLine1: string
+    addressLine2?: string
+    addressCity: string
+    addressPostcode: string
+    emergencyContactName: string
+    emergencyContactNumber: string
+    assignFreeTier?: boolean
+  }
+): Promise<{ ok: boolean; error?: string }> {
+  await upsertUserViaApi(auth0Id, profile.email, profile.name)
+
+  const profilePayload: Record<string, unknown> = {
+    email: profile.email || null,
+    full_name: profile.name,
+    name: profile.name,
+    date_of_birth: profile.dateOfBirth,
+    address_line1: profile.addressLine1,
+    address_line2: profile.addressLine2 || null,
+    address_city: profile.addressCity,
+    address_postcode: profile.addressPostcode,
+    emergency_contact_name: profile.emergencyContactName,
+    emergency_contact_number: profile.emergencyContactNumber,
+  }
+
+  const profileResult = await updateUserViaApi(auth0Id, profilePayload)
+  if (!profileResult.ok) {
+    return { ok: false, error: profileResult.error || 'Failed to save profile' }
+  }
+
+  const completionPayload: Record<string, unknown> = {
+    onboarding_completed: true,
+  }
+
+  if (profile.assignFreeTier) {
+    completionPayload.assign_free_tier = true
+  }
+
+  const completionResult = await updateUserViaApi(auth0Id, completionPayload)
+  if (!completionResult.ok) {
+    // Profile saved — still allow step 4 if only the completion flag failed
+    console.warn(
+      '[saveOnboardingViaApi] Profile saved but onboarding_completed update failed:',
+      completionResult.error
+    )
+  }
+
+  return { ok: true }
 }
