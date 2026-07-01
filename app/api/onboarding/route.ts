@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
       addressPostcode, 
       emergencyContactName, 
       emergencyContactNumber, 
-      skipSubscription 
+      skipSubscription,
+      assignFreeTier,
     } = await request.json()
 
     // Validate required fields
@@ -48,24 +49,30 @@ export async function POST(request: NextRequest) {
     }
 
     // Update user with onboarding data via API
+    const updatePayload: Record<string, unknown> = {
+      full_name: name,
+      name: name,
+      date_of_birth: dateOfBirth,
+      address_line1: addressLine1,
+      address_line2: addressLine2 || null,
+      address_city: addressCity,
+      address_postcode: addressPostcode,
+      emergency_contact_name: emergencyContactName,
+      emergency_contact_number: emergencyContactNumber,
+      onboarding_completed: true,
+    }
+
+    if (assignFreeTier === true || skipSubscription === true) {
+      updatePayload.assign_free_tier = true
+    }
+
     const response = await fetch('https://api.any-gym.com/user', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'auth0_id': auth0Id,
       },
-      body: JSON.stringify({
-        full_name: name,
-        name: name,
-        date_of_birth: dateOfBirth,
-        address_line1: addressLine1,
-        address_line2: addressLine2 || null,
-        address_city: addressCity,
-        address_postcode: addressPostcode,
-        emergency_contact_name: emergencyContactName,
-        emergency_contact_number: emergencyContactNumber,
-        onboarding_completed: true,
-      }),
+      body: JSON.stringify(updatePayload),
     })
 
     if (!response.ok) {
@@ -75,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      skipSubscription: skipSubscription === true,
+      assignFreeTier: assignFreeTier === true || skipSubscription === true,
     })
   } catch (error: any) {
     console.error('[Onboarding API] Error:', error)

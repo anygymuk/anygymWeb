@@ -37,6 +37,55 @@ interface UserRow {
   updated_at?: Date | string
 }
 
+function mapApiUserToAppUser(
+  userData: Record<string, unknown>,
+  normalizedAuth0Id: string,
+  userEmail?: string,
+  userName?: string
+): AppUser {
+  return {
+    auth0_id: (userData.auth0_id as string) || normalizedAuth0Id,
+    email: (userData.email as string) ?? userEmail ?? undefined,
+    name:
+      (userData.full_name as string) ??
+      (userData.name as string) ??
+      userName ??
+      undefined,
+    date_of_birth: (userData.date_of_birth as string) ?? undefined,
+    address_line1: (userData.address_line1 as string) ?? undefined,
+    address_line2: (userData.address_line2 as string) ?? undefined,
+    address_city: (userData.address_city as string) ?? undefined,
+    address_postcode: (userData.address_postcode as string) ?? undefined,
+    emergency_contact_name:
+      (userData.emergency_contact_name as string) ?? undefined,
+    emergency_contact_number:
+      (userData.emergency_contact_number as string) ?? undefined,
+    onboarding_completed: userData.onboarding_completed === true,
+    created_at: userData.created_at
+      ? new Date(userData.created_at as string)
+      : new Date(),
+    updated_at: userData.updated_at
+      ? new Date(userData.updated_at as string)
+      : new Date(),
+  }
+}
+
+/**
+ * Resolve where to send a user immediately after Auth0 login/signup.
+ */
+export async function getPostAuthRedirectPath(
+  auth0Id: string,
+  userEmail?: string,
+  userName?: string
+): Promise<'/onboarding' | '/dashboard'> {
+  const { needsOnboarding } = await getOrCreateAppUser(
+    auth0Id,
+    userEmail,
+    userName
+  )
+  return needsOnboarding ? '/onboarding' : '/dashboard'
+}
+
 /**
  * Get or create app user from Auth0 ID
  * Returns the user and whether they need onboarding
@@ -54,30 +103,17 @@ export async function getOrCreateAppUser(
       headers: {
         'auth0_id': normalizedAuth0Id,
       },
-      next: { revalidate: 60 } // Cache for 1 minute
+      cache: 'no-store',
     })
 
     if (response.ok) {
       const userData = await response.json()
-      
-      // Map API response to AppUser type
-      const user: AppUser = {
-        auth0_id: userData.auth0_id || normalizedAuth0Id,
-        email: userData.email ?? userEmail ?? undefined,
-        name: userData.full_name ?? userData.name ?? userName ?? undefined,
-        date_of_birth: userData.date_of_birth ?? undefined,
-        address_line1: userData.address_line1 ?? undefined,
-        address_line2: userData.address_line2 ?? undefined,
-        address_city: userData.address_city ?? undefined,
-        address_postcode: userData.address_postcode ?? undefined,
-        emergency_contact_name: userData.emergency_contact_name ?? undefined,
-        emergency_contact_number: userData.emergency_contact_number ?? undefined,
-        onboarding_completed: userData.onboarding_completed === true || 
-          (userData.date_of_birth && userData.address_line1 && userData.address_city && userData.address_postcode) || 
-          false,
-        created_at: userData.created_at ? new Date(userData.created_at) : new Date(),
-        updated_at: userData.updated_at ? new Date(userData.updated_at) : new Date(),
-      }
+      const user = mapApiUserToAppUser(
+        userData,
+        normalizedAuth0Id,
+        userEmail,
+        userName
+      )
       
       return {
         user,
@@ -121,26 +157,17 @@ export async function getOrCreateAppUser(
           headers: {
             'auth0_id': normalizedAuth0Id,
           },
-          next: { revalidate: 60 }
+          cache: 'no-store',
         })
         
         if (fetchResponse.ok) {
           const userData = await fetchResponse.json()
-          const user: AppUser = {
-            auth0_id: userData.auth0_id || normalizedAuth0Id,
-            email: userData.email ?? userEmail ?? undefined,
-            name: userData.full_name ?? userData.name ?? userName ?? undefined,
-            date_of_birth: userData.date_of_birth ?? undefined,
-            address_line1: userData.address_line1 ?? undefined,
-            address_line2: userData.address_line2 ?? undefined,
-            address_city: userData.address_city ?? undefined,
-            address_postcode: userData.address_postcode ?? undefined,
-            emergency_contact_name: userData.emergency_contact_name ?? undefined,
-            emergency_contact_number: userData.emergency_contact_number ?? undefined,
-            onboarding_completed: userData.onboarding_completed === true || false,
-            created_at: userData.created_at ? new Date(userData.created_at) : new Date(),
-            updated_at: userData.updated_at ? new Date(userData.updated_at) : new Date(),
-          }
+          const user = mapApiUserToAppUser(
+            userData,
+            normalizedAuth0Id,
+            userEmail,
+            userName
+          )
           return {
             user,
             needsOnboarding: !user.onboarding_completed,
@@ -153,21 +180,12 @@ export async function getOrCreateAppUser(
     }
 
     const userData = await response.json()
-    const user: AppUser = {
-      auth0_id: userData.auth0_id || normalizedAuth0Id,
-      email: userData.email ?? userEmail ?? undefined,
-      name: userData.full_name ?? userData.name ?? userName ?? undefined,
-      date_of_birth: userData.date_of_birth ?? undefined,
-      address_line1: userData.address_line1 ?? undefined,
-      address_line2: userData.address_line2 ?? undefined,
-      address_city: userData.address_city ?? undefined,
-      address_postcode: userData.address_postcode ?? undefined,
-      emergency_contact_name: userData.emergency_contact_name ?? undefined,
-      emergency_contact_number: userData.emergency_contact_number ?? undefined,
-      onboarding_completed: userData.onboarding_completed === true || false,
-      created_at: userData.created_at ? new Date(userData.created_at) : new Date(),
-      updated_at: userData.updated_at ? new Date(userData.updated_at) : new Date(),
-    }
+    const user = mapApiUserToAppUser(
+      userData,
+      normalizedAuth0Id,
+      userEmail,
+      userName
+    )
     
     console.log('[getOrCreateAppUser] Successfully created user via API:', user.auth0_id, 'needsOnboarding: true')
     return {

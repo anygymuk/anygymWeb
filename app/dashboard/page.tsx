@@ -1,9 +1,11 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { Subscription, Gym } from '@/lib/types'
+import { Subscription, Gym, MembershipContext } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import GymMapView from '@/components/GymMapView'
 import { getOrCreateAppUser } from '@/lib/user'
+import { buildMembershipContext, mapMembershipFromApi } from '@/lib/membership'
+import { mapGymFromApi } from '@/lib/gym'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -33,53 +35,7 @@ async function getUserData(auth0Id: string, fallbackEmail?: string, fallbackName
       // Extract membership from user response
       let subscription: Subscription | null = null
       if (userData.membership) {
-        const membershipData = userData.membership
-        
-        // Parse next_billing_date
-        let nextBillingDate: Date
-        if (membershipData.next_billing_date) {
-          const billingDateStr = membershipData.next_billing_date
-          if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
-            nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
-          } else {
-            nextBillingDate = new Date(billingDateStr)
-          }
-        } else {
-          nextBillingDate = membershipData.current_period_end 
-            ? new Date(membershipData.current_period_end)
-            : new Date()
-        }
-        
-        // Map membership to Subscription type
-        // Only default to 'standard' if tier is explicitly null/undefined/empty, not if it's a valid string
-        const tierValue = membershipData.tier
-        const tier = (tierValue && typeof tierValue === 'string' && tierValue.trim()) ? tierValue : 'standard'
-        
-        subscription = {
-          id: membershipData.id || 0,
-          userId: membershipData.user_id || auth0Id,
-          tier: tier,
-          monthlyLimit: membershipData.monthly_limit != null ? Number(membershipData.monthly_limit) : 0,
-          visitsUsed: membershipData.visits_used != null ? Number(membershipData.visits_used) : 0,
-          price: membershipData.price != null ? parseFloat(membershipData.price) : 0,
-          startDate: membershipData.start_date 
-            ? new Date(membershipData.start_date)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          nextBillingDate: nextBillingDate,
-          currentPeriodStart: membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date(),
-          currentPeriodEnd: membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date(),
-          status: membershipData.status || 'active',
-          stripeSubscriptionId: membershipData.stripe_subscription_id || undefined,
-          stripeCustomerId: membershipData.stripe_customer_id || undefined,
-          guestPassesLimit: membershipData.guest_passes_limit != null ? Number(membershipData.guest_passes_limit) : 0,
-          guestPassesUsed: membershipData.guest_passes_used != null ? Number(membershipData.guest_passes_used) : 0,
-          createdAt: membershipData.created_at 
-            ? new Date(membershipData.created_at)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          updatedAt: membershipData.updated_at 
-            ? new Date(membershipData.updated_at)
-            : (membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date()),
-        } as Subscription
+        subscription = mapMembershipFromApi(userData.membership, auth0Id)
       }
       
       return { name: userName, subscription }
@@ -110,25 +66,7 @@ async function getAllGyms(): Promise<Gym[]> {
     // Map API response to Gym type
     return data
       .filter((gym: any) => gym.latitude != null && gym.longitude != null)
-      .map((gym: any) => ({
-        id: gym.id,
-        name: gym.name,
-        address: gym.address || '',
-        city: gym.city || '',
-        postcode: gym.postcode || '',
-        phone: gym.phone || undefined,
-        latitude: gym.latitude ? parseFloat(gym.latitude) : undefined,
-        longitude: gym.longitude ? parseFloat(gym.longitude) : undefined,
-        gym_chain_id: gym.gym_chain_id || undefined,
-        required_tier: gym.required_tier || 'standard',
-        amenities: gym.amenities || [],
-        opening_hours: gym.opening_hours || {},
-        image_url: gym.image_url || undefined,
-        rating: undefined, // Not provided by API
-        status: 'active', // Default to active
-        createdAt: new Date(), // Default to current date
-        updatedAt: new Date(), // Default to current date
-      })) as Gym[]
+      .map((gym: any) => mapGymFromApi(gym)) as Gym[]
   } catch (error) {
     console.error('Error fetching gyms:', error)
     return []
@@ -207,6 +145,7 @@ export default async function Dashboard() {
 
     const userDataResult = userData.status === 'fulfilled' ? userData.value : { name: session.user.name || session.user.email || 'User', subscription: null }
     const subscriptionResult = userDataResult.subscription
+    const membershipContext: MembershipContext = buildMembershipContext(subscriptionResult)
     const gymsResult = gyms.status === 'fulfilled' ? gyms.value : []
     const chainsResult = chains.status === 'fulfilled' ? chains.value : []
     const userNameResult = userDataResult.name
@@ -246,7 +185,7 @@ export default async function Dashboard() {
             <GymMapView 
               initialGyms={gymsResult} 
               chains={chainsResult}
-              hasSubscription={!!subscriptionResult}
+              membershipContext={membershipContext}
             />
           </div>
         </div>

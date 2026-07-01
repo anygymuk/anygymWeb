@@ -6,9 +6,19 @@ interface TermsModalProps {
   chain?: any | null
   onAccept: () => void
   onCancel: () => void
+  actionLabel?: string
+  priceDisplay?: string
+  subtitle?: string
 }
 
-export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProps) {
+export default function TermsModal({
+  chain,
+  onAccept,
+  onCancel,
+  actionLabel = 'Accept & Generate Pass',
+  priceDisplay,
+  subtitle = 'Please review and accept the terms and health statement to generate your pass',
+}: TermsModalProps) {
   // Check if terms exist - either as URL or as markdown content
   const hasTerms = chain?.terms_url || chain?.terms
   // Check if health statement exists - either as URL or as markdown content
@@ -29,8 +39,13 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
             Terms & Health Statement
           </h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Please review and accept the terms and health statement to generate your pass
+            {subtitle}
           </p>
+          {priceDisplay && (
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-3">
+              {priceDisplay}
+            </p>
+          )}
         </div>
 
         {/* Content */}
@@ -198,7 +213,7 @@ export default function TermsModal({ chain, onAccept, onCancel }: TermsModalProp
             onClick={onAccept}
             className="flex-1 px-4 py-2 bg-[#FF6B6B] text-white rounded-lg hover:bg-[#FF5252] transition-colors font-medium"
           >
-            Accept & Generate Pass
+            {actionLabel}
           </button>
         </div>
       </div>

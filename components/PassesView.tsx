@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Subscription, GymPass } from '@/lib/types'
+import { getMembershipMode, formatPrice } from '@/lib/membership'
+import { redirectToPassCheckout } from '@/lib/pass-checkout'
 import TermsModal from '@/components/TermsModal'
 
 interface PassHistoryItem {
@@ -39,8 +41,14 @@ export default function PassesView({
   passHistory: initialPassHistory,
 }: PassesViewProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const [purchaseSuccess, setPurchaseSuccess] = useState(false)
   const [expandedGyms, setExpandedGyms] = useState<Set<number>>(new Set())
-  const [showTermsModal, setShowTermsModal] = useState<{ gymId: number; chain: any } | null>(null)
+  const [showTermsModal, setShowTermsModal] = useState<{
+    gymId: number
+    chain: any
+    pricePerPass?: number
+  } | null>(null)
   const [loadingGymId, setLoadingGymId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   
@@ -49,7 +57,17 @@ export default function PassesView({
   const [activePasses, setActivePasses] = useState<GymPass[]>(initialActivePasses)
   const [passHistory, setPassHistory] = useState<PassHistoryItem[]>(initialPassHistory)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  
+
+  const membershipMode = getMembershipMode(subscription)
+  const isFreeTier = membershipMode === 'free'
+  const isPaidTier = membershipMode === 'paid'
+
+  useEffect(() => {
+    if (searchParams.get('purchase') === 'success') {
+      setPurchaseSuccess(true)
+      router.replace('/passes', { scroll: false })
+    }
+  }, [searchParams, router])
   // Debug logging with error handling
   useEffect(() => {
     try {
@@ -211,38 +229,48 @@ export default function PassesView({
     setError(null)
 
     try {
-      // Always fetch full chain data to check for terms and health statements
-      // The chain data from pass history may only have basic info (name, logo) without terms
       try {
         const response = await fetch(`/api/gyms/${gymId}`)
         if (response.ok) {
           const data = await response.json()
           if (data.gym_chain) {
             const chainData = data.gym_chain
-            // Check if terms exist - either as URL or as markdown content
-            const hasTerms = 
+            const hasTerms =
               (chainData.terms_url && typeof chainData.terms_url === 'string' && chainData.terms_url.trim() !== '') ||
               (chainData.terms && typeof chainData.terms === 'string' && chainData.terms.trim() !== '')
-            
-            // Check if health statement exists - either as URL or as markdown content
+
             const hasHealthStatement =
               (chainData.health_statement_url && typeof chainData.health_statement_url === 'string' && chainData.health_statement_url.trim() !== '') ||
               (chainData.health_statement && typeof chainData.health_statement === 'string' && chainData.health_statement.trim() !== '')
 
             if (hasTerms || hasHealthStatement) {
-              // Show terms modal with full chain data
-              setShowTermsModal({ gymId, chain: chainData })
+              setShowTermsModal({
+                gymId,
+                chain: chainData,
+                pricePerPass: data.gym?.pricePerPass,
+              })
               return
             }
+          }
+
+          if (isFreeTier) {
+            if (data.gym?.pricePerPass && data.gym.pricePerPass > 0) {
+              await purchasePass(gymId)
+            } else {
+              setError('Pass purchase is not available at this gym.')
+            }
+            return
           }
         }
       } catch (fetchError) {
         console.error('Error fetching gym chain data:', fetchError)
-        // Continue to generate pass without terms check if fetch fails
       }
 
-      // No terms found, generate pass directly
-      await generatePass(gymId)
+      if (isPaidTier) {
+        await generatePass(gymId)
+      } else if (isFreeTier) {
+        setError('Pass purchase is not available at this gym.')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setLoadingGymId(null)
@@ -377,6 +405,19 @@ export default function PassesView({
     }
   }
 
+  const purchasePass = async (gymId: number) => {
+    setShowTermsModal(null)
+    setLoadingGymId(gymId)
+    setError(null)
+
+    try {
+      await redirectToPassCheckout(gymId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      setLoadingGymId(null)
+    }
+  }
+
   const generatePass = async (gymId: number) => {
     setShowTermsModal(null)
     setLoadingGymId(gymId)
@@ -440,7 +481,35 @@ export default function PassesView({
   
   return (
     <div className="space-y-6">
-      {/* Monthly Usage Section */}
+      {purchaseSuccess && (
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-center justify-between">
+          <p className="text-green-800 dark:text-green-200 font-medium">
+            Pass purchased successfully! Your new pass is ready below.
+          </p>
+          <button
+            onClick={() => setPurchaseSuccess(false)}
+            className="text-green-600 dark:text-green-400 hover:text-green-800 text-sm font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {isFreeTier ? (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+              Free Plan
+            </span>
+          </div>
+          <p className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+            Pay per pass
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Purchase individual gym passes at each gym&apos;s listed price. Passes are valid for 24 hours after purchase.
+          </p>
+        </div>
+      ) : (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
         <div className="space-y-6">
           {/* Gym Passes Generated in Billing Period */}
@@ -528,6 +597,7 @@ export default function PassesView({
           </div>
         </div>
       </div>
+      )}
 
       {/* Active Passes Section */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
@@ -597,6 +667,15 @@ export default function PassesView({
                             ]
                               .filter(Boolean)
                               .join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Pass cost for free tier */}
+                      {isFreeTier && pass.passCost != null && pass.passCost > 0 && (
+                        <div className="flex items-start gap-2">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                            Paid: {formatPrice(pass.passCost)}
                           </p>
                         </div>
                       )}
@@ -755,6 +834,7 @@ export default function PassesView({
                             }) : 'N/A'}
                           </p>
                         </div>
+                        {(isPaidTier || isFreeTier) && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -769,17 +849,18 @@ export default function PassesView({
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                               </svg>
-                              Generating...
+                              {isFreeTier ? 'Processing...' : 'Generating...'}
                             </>
                           ) : (
                             <>
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                               </svg>
-                              Generate New Pass
+                              {isFreeTier ? 'Purchase Pass' : 'Generate New Pass'}
                             </>
                           )}
                         </button>
+                        )}
                         <button
                           onClick={() => toggleGym(item.gym.id)}
                           className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
@@ -863,12 +944,29 @@ export default function PassesView({
       {showTermsModal && (
         <TermsModal
           chain={showTermsModal.chain}
-          onAccept={() => generatePass(showTermsModal.gymId)}
+          onAccept={() =>
+            isFreeTier
+              ? purchasePass(showTermsModal.gymId)
+              : generatePass(showTermsModal.gymId)
+          }
           onCancel={() => {
             setShowTermsModal(null)
             setLoadingGymId(null)
             setError(null)
           }}
+          actionLabel={
+            isFreeTier ? 'Accept & Purchase Pass' : 'Accept & Generate Pass'
+          }
+          priceDisplay={
+            isFreeTier && showTermsModal.pricePerPass
+              ? formatPrice(showTermsModal.pricePerPass)
+              : undefined
+          }
+          subtitle={
+            isFreeTier
+              ? 'Please review and accept the terms and health statement to purchase your pass'
+              : undefined
+          }
         />
       )}
     </div>

@@ -236,8 +236,7 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleSkipSubscription = async () => {
-    // Save onboarding and redirect to dashboard
+  const handleContinueWithFree = async () => {
     setLoading(true)
     setError(null)
 
@@ -249,7 +248,7 @@ export default function OnboardingPage() {
         },
         body: JSON.stringify({
           ...formData,
-          skipSubscription: true,
+          assignFreeTier: true,
         }),
       })
 
@@ -318,7 +317,7 @@ export default function OnboardingPage() {
               {step === 1 && 'We need some basic information to set up your account'}
               {step === 2 && 'Please provide your address'}
               {step === 3 && 'Please provide an emergency contact'}
-              {step === 4 && 'Select a subscription plan to get started'}
+              {step === 4 && 'Select a subscription plan, or continue with free pay-per-pass access'}
             </p>
 
             {error && (
@@ -580,11 +579,11 @@ export default function OnboardingPage() {
                 <div className="flex-1 flex gap-4">
                   <button
                     type="button"
-                    onClick={handleSkipSubscription}
+                    onClick={handleContinueWithFree}
                     disabled={loading}
                     className="flex-1 px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Skip for Now
+                    Continue with Free
                   </button>
                   <button
                     type="button"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { Gym } from '@/lib/types'
+import { mapGymFromApi } from '@/lib/gym'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -35,26 +35,7 @@ export async function GET(
     
     const gymData = await response.json()
 
-    // Map API response to Gym type
-    const gym: Gym = {
-      id: gymData.id,
-      name: gymData.name,
-      address: gymData.address || '',
-      city: gymData.city || '',
-      postcode: gymData.postcode || '',
-      phone: gymData.phone || undefined,
-      latitude: gymData.latitude ? parseFloat(gymData.latitude) : undefined,
-      longitude: gymData.longitude ? parseFloat(gymData.longitude) : undefined,
-      gym_chain_id: gymData.gym_chain_id || undefined,
-      required_tier: gymData.required_tier || 'standard',
-      amenities: gymData.amenities || [],
-      opening_hours: gymData.opening_hours || {},
-      image_url: gymData.image_url || undefined,
-      rating: undefined,
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
+    const gym = mapGymFromApi(gymData)
 
     // Extract gym_chain from API response
     let gym_chain = null

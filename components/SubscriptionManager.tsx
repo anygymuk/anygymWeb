@@ -189,6 +189,7 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
   }
 
   const currentTier = subscription?.tier?.toLowerCase() || null
+  const isFreeTier = currentTier === 'free'
   
   // Format dates (handle both Date objects and strings from Next.js serialization)
   const formatDate = (date: Date | string | undefined): string | null => {
@@ -222,20 +223,34 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
             Your Current Plan
           </h2>
           <div>
-            <p className="text-gray-700 dark:text-gray-300 mb-2">
-              You have an active <span className="font-semibold">{getTierDisplayName(subscription.tier)}</span> membership.
-            </p>
-            {currentPeriod && (
-              <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">
-                Current Period: {currentPeriod}
-              </p>
-            )}
-            {nextBillingDate && (
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                Next billing date: {nextBillingDate}
-              </p>
+            {isFreeTier ? (
+              <>
+                <p className="text-gray-700 dark:text-gray-300 mb-2">
+                  You are on the <span className="font-semibold">Free</span> plan — pay per pass at each gym&apos;s listed price.
+                </p>
+                <p className="text-gray-600 dark:text-gray-400 text-sm">
+                  Upgrade to a subscription below for monthly included passes and guest passes.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-700 dark:text-gray-300 mb-2">
+                  You have an active <span className="font-semibold">{getTierDisplayName(subscription.tier)}</span> membership.
+                </p>
+                {currentPeriod && (
+                  <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">
+                    Current Period: {currentPeriod}
+                  </p>
+                )}
+                {nextBillingDate && (
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">
+                    Next billing date: {nextBillingDate}
+                  </p>
+                )}
+              </>
             )}
           </div>
+          {!isFreeTier && (
           <button
             onClick={handleCancelMembership}
             disabled={loading === 'cancel'}
@@ -243,13 +258,14 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
           >
             {loading === 'cancel' ? 'Loading...' : 'Cancel Membership'}
           </button>
+          )}
         </div>
       )}
 
       {/* Switch Plan Section */}
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Switch Your Plan
+          {isFreeTier ? 'Upgrade Your Plan' : 'Switch Your Plan'}
         </h2>
         {!products || products.length === 0 ? (
           <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
@@ -322,7 +338,9 @@ export default function SubscriptionManager({ subscription, products }: Subscrip
                   >
                     {loading === product.stripePriceId
                       ? 'Loading...'
-                      : `Switch to this Plan`}
+                      : isFreeTier
+                      ? 'Upgrade to this Plan'
+                      : 'Switch to this Plan'}
                   </button>
                 )}
               </div>

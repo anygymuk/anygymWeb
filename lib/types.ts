@@ -9,6 +9,7 @@ export interface Gym {
   longitude?: number
   gym_chain_id?: number
   required_tier: string
+  pricePerPass?: number
   amenities?: any // jsonb
   opening_hours?: any // jsonb
   image_url?: string
@@ -16,6 +17,17 @@ export interface Gym {
   status?: string
   createdAt: Date
   updatedAt: Date
+}
+
+export type MembershipMode = 'none' | 'free' | 'paid'
+
+export interface MembershipContext {
+  mode: MembershipMode
+  tier: string | null
+  subscription: Subscription | null
+  hasMembership: boolean
+  isFreeTier: boolean
+  isPaidTier: boolean
 }
 
 export interface GymPass {

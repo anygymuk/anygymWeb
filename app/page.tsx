@@ -1,17 +1,21 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
+import { getPostAuthRedirectPath } from '@/lib/user'
 
-// Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
 
 export default async function Home() {
   const session = await getSession()
 
-  if (session?.user) {
-    redirect('/dashboard')
+  if (!session?.user) {
+    redirect('/api/auth/login')
   }
 
-  // Redirect to Auth0 login if not authenticated
-  redirect('/api/auth/login')
-}
+  const redirectPath = await getPostAuthRedirectPath(
+    session.user.sub,
+    session.user.email,
+    session.user.name
+  )
 
+  redirect(redirectPath)
+}

@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { Gym } from '@/lib/types'
+import { Gym, MembershipContext, Subscription } from '@/lib/types'
 import GymDetailsPanel from './GymDetailsPanel'
+import { buildMembershipContext } from '@/lib/membership'
 
 // Dynamically import GymMap to avoid SSR issues with Leaflet
 const GymMap = dynamic(() => import('./GymMap'), {
@@ -14,10 +15,24 @@ const GymMap = dynamic(() => import('./GymMap'), {
 interface GymMapViewProps {
   initialGyms: Gym[]
   chains?: any[]
+  membershipContext?: MembershipContext
+  /** @deprecated Use membershipContext instead */
   hasSubscription?: boolean
 }
 
-export default function GymMapView({ initialGyms, chains, hasSubscription = false }: GymMapViewProps) {
+export default function GymMapView({
+  initialGyms,
+  chains,
+  membershipContext,
+  hasSubscription = false,
+}: GymMapViewProps) {
+  const resolvedContext =
+    membershipContext ??
+    buildMembershipContext(
+      hasSubscription
+        ? ({ tier: 'standard', status: 'active' } as Subscription)
+        : null
+    )
   const [gyms, setGyms] = useState<Gym[]>(initialGyms)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTier, setSelectedTier] = useState('All Tiers')
@@ -250,7 +265,7 @@ export default function GymMapView({ initialGyms, chains, hasSubscription = fals
           gym={selectedGym}
           chain={selectedGymChain}
           onClose={() => setSelectedGym(null)}
-          hasSubscription={hasSubscription}
+          membershipContext={resolvedContext}
         />
       )}
     </div>

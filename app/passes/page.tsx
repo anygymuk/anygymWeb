@@ -1,5 +1,6 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
+import { Suspense } from 'react'
 import { GymPass, Subscription } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import PassesView from '@/components/PassesView'
@@ -547,11 +548,13 @@ export default async function PassesPage() {
             </p>
           </div>
           <div className="px-6 pb-6">
-                <PassesView
-                  subscription={subscription}
-                  activePasses={activePasses}
-                  passHistory={passHistory}
-                />
+            <Suspense fallback={<div className="text-gray-600 dark:text-gray-400">Loading passes...</div>}>
+              <PassesView
+                subscription={subscription}
+                activePasses={activePasses}
+                passHistory={passHistory}
+              />
+            </Suspense>
           </div>
         </div>
       </DashboardLayout>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { Gym } from '@/lib/types'
+import { mapGymFromApi } from '@/lib/gym'
 
 // Mark route as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -39,25 +40,7 @@ export async function GET(request: NextRequest) {
     // Map API response to Gym type and filter
     let gyms: Gym[] = data
       .filter((gym: any) => gym.latitude != null && gym.longitude != null)
-      .map((gym: any) => ({
-        id: gym.id,
-        name: gym.name,
-        address: gym.address || '',
-        city: gym.city || '',
-        postcode: gym.postcode || '',
-        phone: gym.phone || undefined,
-        latitude: gym.latitude ? parseFloat(gym.latitude) : undefined,
-        longitude: gym.longitude ? parseFloat(gym.longitude) : undefined,
-        gym_chain_id: gym.gym_chain_id || undefined,
-        required_tier: gym.required_tier || 'standard',
-        amenities: gym.amenities || [],
-        opening_hours: gym.opening_hours || {},
-        image_url: gym.image_url || undefined,
-        rating: undefined,
-        status: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })) as Gym[]
+      .map((gym: any) => mapGymFromApi(gym)) as Gym[]
 
     // Apply filters client-side
     if (searchQuery) {
