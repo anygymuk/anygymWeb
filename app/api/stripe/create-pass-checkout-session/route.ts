@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
+import {
+  createPassCheckoutViaApi,
+  createPassCheckoutViaStripe,
+  ensureFreeTierOnApi,
+  isMembershipRequiredError,
+} from '@/lib/pass-checkout-server'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -28,39 +34,51 @@ export async function POST(request: NextRequest) {
 
     const origin = request.nextUrl.origin
 
-    const response = await fetch(
-      'https://api.any-gym.com/purchase_pass_checkout',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          auth0_id: auth0Id,
-        },
-        body: JSON.stringify({
-          auth0_id: auth0Id,
-          gym_id: gymIdInt,
-          success_url: `${origin}/passes?purchase=success`,
-          cancel_url: `${origin}/dashboard?purchase=canceled`,
-        }),
-      }
-    )
+    await ensureFreeTierOnApi(auth0Id)
 
-    if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => ({ error: 'Failed to create pass checkout session' }))
+    const apiResult = await createPassCheckoutViaApi(auth0Id, gymIdInt, origin)
+    if (apiResult.ok) {
+      return NextResponse.json({
+        sessionId: apiResult.sessionId,
+        url: apiResult.url,
+      })
+    }
+
+    const shouldFallback =
+      isMembershipRequiredError(apiResult.error, apiResult.status) ||
+      apiResult.status === 404 ||
+      apiResult.status === 501
+
+    if (shouldFallback) {
+      console.warn(
+        '[create-pass-checkout-session] API checkout unavailable, using Stripe fallback:',
+        apiResult.error
+      )
+
+      const stripeResult = await createPassCheckoutViaStripe({
+        auth0Id,
+        userEmail: session.user.email,
+        gymId: gymIdInt,
+        origin,
+      })
+
+      if (stripeResult.ok) {
+        return NextResponse.json({
+          sessionId: stripeResult.sessionId,
+          url: stripeResult.url,
+        })
+      }
+
       return NextResponse.json(
-        { error: errorData.error || 'Failed to create pass checkout session' },
-        { status: response.status }
+        { error: stripeResult.error || 'Failed to create pass checkout session' },
+        { status: stripeResult.status || 500 }
       )
     }
 
-    const data = await response.json()
-
-    return NextResponse.json({
-      sessionId: data.session_id || data.sessionId || undefined,
-      url: data.checkout_url || data.checkoutUrl || data.url || undefined,
-    })
+    return NextResponse.json(
+      { error: apiResult.error || 'Failed to create pass checkout session' },
+      { status: apiResult.status || 502 }
+    )
   } catch (error) {
     console.error('[create-pass-checkout-session] Error:', error)
     return NextResponse.json(

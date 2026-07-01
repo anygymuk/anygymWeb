@@ -116,6 +116,60 @@ async function handleOtherEvents(event: Stripe.Event) {
   }
 }
 
+const API_BASE = process.env.ANYGYM_API_BASE_URL || 'https://api.any-gym.com'
+
+async function fulfillPassPurchaseOnApi(
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const auth0Id =
+    session.metadata?.auth0_id ||
+    session.metadata?.userId ||
+    undefined
+  const gymId = session.metadata?.gym_id
+
+  if (!auth0Id || !gymId) {
+    console.error('[webhook] Missing auth0_id or gym_id for pass purchase fulfillment')
+    return
+  }
+
+  const payload = {
+    auth0_id: auth0Id,
+    gym_id: Number(gymId),
+    stripe_checkout_session_id: session.id,
+    stripe_payment_intent_id: session.payment_intent,
+    amount: session.amount_total ? session.amount_total / 100 : undefined,
+    currency: session.currency || 'gbp',
+    purchase_type: 'single_pass',
+  }
+
+  console.log('[webhook] Fulfilling pass purchase on API:', payload)
+
+  try {
+    const response = await fetch(`${API_BASE}/complete_pass_purchase`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        auth0_id: auth0Id,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (response.ok) {
+      console.log('[webhook] Pass purchase fulfilled successfully')
+      return
+    }
+
+    const errorText = await response.text()
+    console.error(
+      '[webhook] Pass purchase fulfillment failed:',
+      response.status,
+      errorText
+    )
+  } catch (error) {
+    console.error('[webhook] Error fulfilling pass purchase:', error)
+  }
+}
+
 async function processCheckoutSession(
   event: Stripe.Event,
   request: NextRequest
@@ -123,6 +177,12 @@ async function processCheckoutSession(
   console.log('🚀 PROCESSING CHECKOUT SESSION')
 
   const session = event.data.object as Stripe.Checkout.Session
+
+  if (session.metadata?.purchase_type === 'single_pass') {
+    await fulfillPassPurchaseOnApi(session)
+    return
+  }
+
   const tier = session.metadata?.tier
 
   console.log('📋 Customer ID:', session.customer)
