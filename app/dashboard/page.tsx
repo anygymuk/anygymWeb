@@ -1,55 +1,19 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { Subscription, Gym, MembershipContext } from '@/lib/types'
+import { cookies } from 'next/headers'
+import { Gym, MembershipContext } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import GymMapView from '@/components/GymMapView'
 import { getOrCreateAppUser } from '@/lib/user'
-import { buildMembershipContext, mapMembershipFromApi } from '@/lib/membership'
+import {
+  buildMembershipContext,
+  fetchUserDataWithSubscription,
+  FREE_TIER_COOKIE,
+} from '@/lib/membership'
 import { mapGymFromApi } from '@/lib/gym'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
-
-
-interface UserData {
-  name: string
-  subscription: Subscription | null
-}
-
-async function getUserData(auth0Id: string, fallbackEmail?: string, fallbackName?: string): Promise<UserData> {
-  try {
-    const trimmedAuth0Id = auth0Id.trim()
-    const response = await fetch('https://api.any-gym.com/user', {
-      headers: {
-        'auth0_id': trimmedAuth0Id,
-      },
-      next: { revalidate: 60 } // Cache for 1 minute
-    })
-    
-    if (response.ok) {
-      const userData = await response.json()
-      
-      // Extract name
-      const userName = userData.full_name || userData.name || fallbackName || fallbackEmail || 'User'
-      
-      // Extract membership from user response
-      let subscription: Subscription | null = null
-      if (userData.membership) {
-        subscription = mapMembershipFromApi(userData.membership, auth0Id)
-      }
-      
-      return { name: userName, subscription }
-    }
-  } catch (error) {
-    console.error('[getUserData] Error fetching user data:', error)
-  }
-  
-  // Fallback to Auth0 session data if API fails
-  return {
-    name: fallbackName || fallbackEmail || 'User',
-    subscription: null,
-  }
-}
 
 async function getAllGyms(): Promise<Gym[]> {
   try {
@@ -136,9 +100,15 @@ export default async function Dashboard() {
     }
     
     // Fetch data in parallel with error handling
-    // getUserData fetches both name and membership from /user endpoint
+    const freeTierHint =
+      cookies().get(FREE_TIER_COOKIE)?.value === 'free'
     const [userData, gyms, chains] = await Promise.allSettled([
-      getUserData(auth0Id, session.user.email, session.user.name),
+      fetchUserDataWithSubscription(
+        auth0Id,
+        session.user.email,
+        session.user.name,
+        { freeTierHint }
+      ),
       getAllGyms(),
       getGymChains(auth0Id),
     ])

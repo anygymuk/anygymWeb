@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
 import { saveOnboardingViaApi } from '@/lib/user'
+import { FREE_TIER_COOKIE } from '@/lib/membership'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -63,10 +64,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    const didAssignFreeTier =
+      assignFreeTier === true || skipSubscription === true
+
+    const response = NextResponse.json({
       success: true,
-      assignFreeTier: assignFreeTier === true || skipSubscription === true,
+      assignFreeTier: didAssignFreeTier,
     })
+
+    if (didAssignFreeTier) {
+      response.cookies.set(FREE_TIER_COOKIE, 'free', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 365,
+        path: '/',
+      })
+    }
+
+    return response
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to save onboarding data'
     console.error('[Onboarding API] Error:', message)

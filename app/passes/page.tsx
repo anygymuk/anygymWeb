@@ -1,101 +1,21 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { Suspense } from 'react'
 import { GymPass, Subscription } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import PassesView from '@/components/PassesView'
 import AccountSetupError from '@/components/AccountSetupError'
 import { getOrCreateAppUser } from '@/lib/user'
+import {
+  applyFreeTierHint,
+  fetchUserDataWithSubscription,
+  FREE_TIER_COOKIE,
+  mapMembershipFromApi,
+} from '@/lib/membership'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
-
-interface UserData {
-  name: string
-  subscription: Subscription | null
-}
-
-async function getUserData(auth0Id: string, fallbackEmail?: string, fallbackName?: string): Promise<UserData> {
-  try {
-    const trimmedAuth0Id = auth0Id.trim()
-    const response = await fetch('https://api.any-gym.com/user', {
-      headers: {
-        'auth0_id': trimmedAuth0Id,
-      },
-      next: { revalidate: 60 } // Cache for 1 minute
-    })
-    
-    if (response.ok) {
-      const userData = await response.json()
-      
-      // Extract name
-      const userName = userData.full_name || userData.name || fallbackName || fallbackEmail || 'User'
-      
-      // Extract membership from user response
-      let subscription: Subscription | null = null
-      if (userData.membership) {
-        const membershipData = userData.membership
-        
-        // Parse next_billing_date
-        let nextBillingDate: Date
-        if (membershipData.next_billing_date) {
-          const billingDateStr = membershipData.next_billing_date
-          if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
-            nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
-          } else {
-            nextBillingDate = new Date(billingDateStr)
-          }
-      } else {
-          nextBillingDate = membershipData.current_period_end 
-            ? new Date(membershipData.current_period_end)
-            : new Date()
-        }
-        
-        // Map membership to Subscription type
-        // Only default to 'standard' if tier is explicitly null/undefined/empty, not if it's a valid string
-        const tierValue = membershipData.tier
-        const tier = (tierValue && typeof tierValue === 'string' && tierValue.trim()) ? tierValue : 'standard'
-        
-        subscription = {
-          id: membershipData.id || 0,
-          userId: membershipData.user_id || auth0Id,
-          tier: tier,
-          monthlyLimit: membershipData.monthly_limit != null ? Number(membershipData.monthly_limit) : 0,
-          visitsUsed: membershipData.visits_used != null ? Number(membershipData.visits_used) : 0,
-          price: membershipData.price != null ? parseFloat(membershipData.price) : 0,
-          startDate: membershipData.start_date 
-            ? new Date(membershipData.start_date)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          nextBillingDate: nextBillingDate,
-          currentPeriodStart: membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date(),
-          currentPeriodEnd: membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date(),
-          status: membershipData.status || 'active',
-          stripeSubscriptionId: membershipData.stripe_subscription_id || undefined,
-          stripeCustomerId: membershipData.stripe_customer_id || undefined,
-          guestPassesLimit: membershipData.guest_passes_limit != null ? Number(membershipData.guest_passes_limit) : 0,
-          guestPassesUsed: membershipData.guest_passes_used != null ? Number(membershipData.guest_passes_used) : 0,
-          createdAt: membershipData.created_at 
-            ? new Date(membershipData.created_at)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          updatedAt: membershipData.updated_at 
-            ? new Date(membershipData.updated_at)
-            : (membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date()),
-        } as Subscription
-      }
-      
-      return { name: userName, subscription }
-    }
-  } catch (error) {
-    console.error('[getUserData] Error fetching user data:', error)
-  }
-  
-  // Fallback to Auth0 session data if API fails
-  return {
-    name: fallbackName || fallbackEmail || 'User',
-    subscription: null,
-  }
-}
-
 
 // Helper function to fetch all passes from API
 // This endpoint also returns subscription data, so we return both passes and subscription
@@ -442,60 +362,21 @@ export default async function PassesPage() {
   console.log('[PassesPage] ==========================================')
   
   try {
+    const freeTierHint =
+      cookies().get(FREE_TIER_COOKIE)?.value === 'free'
+
     // Fetch passes first - the /user/passes endpoint also returns subscription data
-    // This subscription data has the correct visits_used value
     const { passes: allPassesFromAPI, subscription: subscriptionFromPasses } = await fetchUserPassesFromAPI(auth0Id)
     console.log('[PassesPage] Subscription from /user/passes:', subscriptionFromPasses)
     
-    // Try to get subscription from /user/passes response first (has correct visits_used)
-    // Fall back to membership from /user endpoint (fetched via getUserData) if not available
     let subscription: Subscription | null = null
     
     if (subscriptionFromPasses) {
       console.log('[PassesPage] Using subscription from /user/passes response')
-      // Map the subscription from passes response using the same mapping logic
-      const subscriptionData = subscriptionFromPasses
-      
-      // Parse next_billing_date
-      let nextBillingDate: Date
-      if (subscriptionData.next_billing_date) {
-        const billingDateStr = subscriptionData.next_billing_date
-        if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
-          nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
-        } else {
-          nextBillingDate = new Date(billingDateStr)
-        }
-      } else {
-        nextBillingDate = subscriptionData.current_period_end 
-          ? new Date(subscriptionData.current_period_end)
-          : new Date()
-      }
-      
-      subscription = {
-        id: subscriptionData.id || 0,
-        userId: subscriptionData.user_id || auth0Id,
-        tier: subscriptionData.tier || 'standard',
-        monthlyLimit: subscriptionData.monthly_limit != null ? Number(subscriptionData.monthly_limit) : 0,
-        visitsUsed: subscriptionData.visits_used != null ? Number(subscriptionData.visits_used) : 0,
-        price: subscriptionData.price != null ? parseFloat(subscriptionData.price) : 0,
-        startDate: subscriptionData.start_date 
-          ? new Date(subscriptionData.start_date)
-          : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
-        nextBillingDate: nextBillingDate,
-        currentPeriodStart: subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date(),
-        currentPeriodEnd: subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date(),
-        status: subscriptionData.status || 'active',
-        stripeSubscriptionId: subscriptionData.stripe_subscription_id || undefined,
-        stripeCustomerId: subscriptionData.stripe_customer_id || undefined,
-        guestPassesLimit: subscriptionData.guest_passes_limit != null ? Number(subscriptionData.guest_passes_limit) : 0,
-        guestPassesUsed: subscriptionData.guest_passes_used != null ? Number(subscriptionData.guest_passes_used) : 0,
-        createdAt: subscriptionData.created_at 
-          ? new Date(subscriptionData.created_at)
-          : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
-        updatedAt: subscriptionData.updated_at 
-          ? new Date(subscriptionData.updated_at)
-          : (subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date()),
-      } as Subscription
+      subscription = mapMembershipFromApi(
+        subscriptionFromPasses as Record<string, unknown>,
+        auth0Id
+      )
       
       console.log('[PassesPage] Mapped subscription from passes:', {
         visitsUsed: subscription.visitsUsed,
@@ -504,7 +385,6 @@ export default async function PassesPage() {
       })
     } else {
       console.log('[PassesPage] No subscription in /user/passes response, will use membership from /user endpoint')
-      // Fall back to membership from /user endpoint (handled in getUserData call below)
     }
     
     console.log('[PassesPage] Final subscription:', subscription)
@@ -520,11 +400,17 @@ export default async function PassesPage() {
     const passHistory = await getPassHistory(auth0Id)
     console.log('[PassesPage] Pass history result:', passHistory.length, passHistory)
     
-    // Get user data from API (name and membership)
-    const userData = await getUserData(auth0Id, userEmail, userName)
-    // Prefer subscription from /user/passes if available (has correct visits_used), 
-    // otherwise use membership from /user endpoint, no need for separate /user/subscription call
-    const finalSubscription = subscription || userData.subscription
+    const userData = await fetchUserDataWithSubscription(
+      auth0Id,
+      userEmail,
+      userName,
+      { freeTierHint }
+    )
+    const finalSubscription = applyFreeTierHint(
+      subscription || userData.subscription,
+      auth0Id,
+      freeTierHint
+    )
     const initials = userData.name
       .split(' ')
       .map((n: string) => n[0])
@@ -550,7 +436,7 @@ export default async function PassesPage() {
           <div className="px-6 pb-6">
             <Suspense fallback={<div className="text-gray-600 dark:text-gray-400">Loading passes...</div>}>
               <PassesView
-                subscription={subscription}
+                subscription={finalSubscription}
                 activePasses={activePasses}
                 passHistory={passHistory}
               />
@@ -561,7 +447,14 @@ export default async function PassesPage() {
     )
   } catch (error) {
     console.error('Error loading passes page:', error)
-    const errorUserData = await getUserData(auth0Id, session.user.email, session.user.name)
+    const freeTierHint =
+      cookies().get(FREE_TIER_COOKIE)?.value === 'free'
+    const errorUserData = await fetchUserDataWithSubscription(
+      auth0Id,
+      session.user.email,
+      session.user.name,
+      { freeTierHint }
+    )
     return (
       <DashboardLayout
         userName={errorUserData.name}

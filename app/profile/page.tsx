@@ -1,11 +1,18 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import DashboardLayout from '@/components/DashboardLayout'
 import { Subscription } from '@/lib/types'
 import SubscriptionManager from '@/components/SubscriptionManager'
 import { StripeProduct } from '@/app/api/stripe/products/route'
 import ProfileTabs from '@/components/ProfileTabs'
 import { getOrCreateAppUser } from '@/lib/user'
+import {
+  applyFreeTierHint,
+  fetchUserDataWithSubscription,
+  FREE_TIER_COOKIE,
+  mapMembershipFromApi,
+} from '@/lib/membership'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -33,106 +40,41 @@ async function getUserData(auth0Id: string, fallbackEmail?: string, fallbackName
   return fallbackName || fallbackEmail || 'User'
 }
 
-async function getUserSubscription(auth0Id: string): Promise<Subscription | null> {
-  console.log('[getUserSubscription] ===== FUNCTION CALLED =====')
-  console.log('[getUserSubscription] auth0Id:', auth0Id)
-  
+async function getUserSubscription(
+  auth0Id: string,
+  freeTierHint?: boolean
+): Promise<Subscription | null> {
   try {
     const trimmedAuth0Id = auth0Id.trim()
-    console.log('[getUserSubscription] Making API request to api.any-gym.com/user/subscription')
-    console.log('[getUserSubscription] With header auth0_id:', trimmedAuth0Id)
-    
     const response = await fetch('https://api.any-gym.com/user/subscription', {
       headers: {
-        'auth0_id': trimmedAuth0Id,
+        auth0_id: trimmedAuth0Id,
       },
-      next: { revalidate: 60 } // Cache for 1 minute
+      cache: 'no-store',
     })
-    
-    console.log('[getUserSubscription] API response status:', response.status, response.statusText)
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.log('[getUserSubscription] ❌ 404 - Subscription not found, returning null')
-        return null
-      }
+
+    if (response.ok) {
+      const data = await response.json()
+      const subscriptionData = data.subscription || data
+      return mapMembershipFromApi(
+        subscriptionData as Record<string, unknown>,
+        auth0Id
+      )
+    }
+
+    if (response.status !== 404) {
       const errorText = await response.text()
-      console.error('[getUserSubscription] ❌ API Error:', response.status, errorText)
-      throw new Error(`Failed to fetch subscription: ${response.statusText}`)
+      console.error('[getUserSubscription] API Error:', response.status, errorText)
     }
-    
-    const data = await response.json()
-    console.log('[getUserSubscription] ✅ API Response received')
-    console.log('[getUserSubscription] Response keys:', Object.keys(data))
-    
-    // Handle nested subscription object in API response
-    const subscriptionData = data.subscription || data
-    console.log('[getUserSubscription] subscriptionData keys:', Object.keys(subscriptionData))
-    console.log('[getUserSubscription] subscriptionData.tier:', subscriptionData.tier, 'type:', typeof subscriptionData.tier)
-    
-    // Parse next_billing_date
-    let nextBillingDate: Date
-    if (subscriptionData.next_billing_date) {
-      const billingDateStr = subscriptionData.next_billing_date
-      if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
-        nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
-      } else {
-        nextBillingDate = new Date(billingDateStr)
-      }
-    } else {
-      nextBillingDate = subscriptionData.current_period_end 
-        ? new Date(subscriptionData.current_period_end)
-        : new Date()
-    }
-    
-    // Map API response to Subscription type
-    const tierValue = subscriptionData.tier
-    const tier = (tierValue && typeof tierValue === 'string' && tierValue.trim()) ? tierValue : 'standard'
-    console.log('[getUserSubscription] Final tier value:', tier)
-    
-    // Create subscription object - ensure all Date objects are properly serializable
-    const mappedSubscription: Subscription = {
-      id: subscriptionData.id || 0,
-      userId: subscriptionData.user_id || auth0Id,
-      tier: tier,
-      monthlyLimit: subscriptionData.monthly_limit != null ? Number(subscriptionData.monthly_limit) : 0,
-      visitsUsed: subscriptionData.visits_used != null ? Number(subscriptionData.visits_used) : 0,
-      price: subscriptionData.price != null ? parseFloat(subscriptionData.price) : 0,
-      startDate: subscriptionData.start_date 
-        ? new Date(subscriptionData.start_date)
-        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
-      nextBillingDate: nextBillingDate,
-      currentPeriodStart: subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date(),
-      currentPeriodEnd: subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date(),
-      status: subscriptionData.status || 'active',
-      stripeSubscriptionId: subscriptionData.stripe_subscription_id || undefined,
-      stripeCustomerId: subscriptionData.stripe_customer_id || undefined,
-      guestPassesLimit: subscriptionData.guest_passes_limit != null ? Number(subscriptionData.guest_passes_limit) : 0,
-      guestPassesUsed: subscriptionData.guest_passes_used != null ? Number(subscriptionData.guest_passes_used) : 0,
-      createdAt: subscriptionData.created_at 
-        ? new Date(subscriptionData.created_at)
-        : (subscriptionData.current_period_start ? new Date(subscriptionData.current_period_start) : new Date()),
-      updatedAt: subscriptionData.updated_at 
-        ? new Date(subscriptionData.updated_at)
-        : (subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : new Date()),
-    }
-    
-    console.log('[getUserSubscription] ✅ Mapped subscription object created')
-    console.log('[getUserSubscription] Tier:', mappedSubscription.tier, '(type:', typeof mappedSubscription.tier, ')')
-    console.log('[getUserSubscription] MonthlyLimit:', mappedSubscription.monthlyLimit)
-    console.log('[getUserSubscription] VisitsUsed:', mappedSubscription.visitsUsed)
-    
-    // Verify subscription is not null before returning
-    if (!mappedSubscription) {
-      console.error('[getUserSubscription] ❌ ERROR: mappedSubscription is null/undefined!')
-      return null
-    }
-    
-    return mappedSubscription
   } catch (error) {
     console.error('[getUserSubscription] Error fetching subscription:', error)
-    return null
   }
+
+  const userData = await fetchUserDataWithSubscription(auth0Id, undefined, undefined, {
+    freeTierHint,
+  })
+
+  return applyFreeTierHint(userData.subscription, auth0Id, freeTierHint)
 }
 
 async function getStripeProducts(): Promise<StripeProduct[]> {
@@ -297,9 +239,12 @@ export default async function ProfilePage({
   console.log('[ProfilePage] ===== FETCHING DATA =====')
   console.log('[ProfilePage] auth0Id:', auth0Id)
   
+  const freeTierHint =
+    cookies().get(FREE_TIER_COOKIE)?.value === 'free'
+
   const [userName, subscription, products] = await Promise.all([
     getUserData(auth0Id, session.user.email, session.user.name),
-    getUserSubscription(auth0Id),
+    getUserSubscription(auth0Id, freeTierHint),
     getStripeProducts(),
   ])
   

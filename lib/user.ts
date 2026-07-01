@@ -406,6 +406,8 @@ export async function saveOnboardingViaApi(
 
   if (profile.assignFreeTier) {
     completionPayload.assign_free_tier = true
+    completionPayload.membership_tier = 'free'
+    completionPayload.tier = 'free'
   }
 
   const completionResult = await updateUserViaApi(auth0Id, completionPayload)

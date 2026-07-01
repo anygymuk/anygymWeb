@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Logo from '@/components/Logo'
 import { StripeProduct } from '@/app/api/stripe/products/route'
 import { loadStripe, Stripe } from '@stripe/stripe-js'
@@ -43,6 +43,7 @@ const CheckIcon = () => (
 
 export default function OnboardingPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState(1)
@@ -63,6 +64,10 @@ export default function OnboardingPage() {
 
   // Fetch products when component mounts
   useEffect(() => {
+    if (searchParams.get('step') === '4') {
+      setStep(4)
+    }
+
     const fetchProducts = async () => {
       try {
         const response = await fetch('/api/stripe/products')
@@ -79,7 +84,7 @@ export default function OnboardingPage() {
       }
     }
     fetchProducts()
-  }, [])
+  }, [searchParams])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target

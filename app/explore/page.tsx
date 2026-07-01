@@ -1,97 +1,14 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import { Subscription, Article } from '@/lib/types'
+import { cookies } from 'next/headers'
+import { Article } from '@/lib/types'
 import DashboardLayout from '@/components/DashboardLayout'
 import ArticleCard from '@/components/ArticleCard'
 import { getOrCreateAppUser } from '@/lib/user'
+import { fetchUserDataWithSubscription, FREE_TIER_COOKIE } from '@/lib/membership'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
-
-interface UserData {
-  name: string
-  subscription: Subscription | null
-}
-
-async function getUserData(auth0Id: string, fallbackEmail?: string, fallbackName?: string): Promise<UserData> {
-  try {
-    const trimmedAuth0Id = auth0Id.trim()
-    const response = await fetch('https://api.any-gym.com/user', {
-      headers: {
-        'auth0_id': trimmedAuth0Id,
-      },
-      next: { revalidate: 60 } // Cache for 1 minute
-    })
-    
-    if (response.ok) {
-      const userData = await response.json()
-      
-      // Extract name
-      const userName = userData.full_name || userData.name || fallbackName || fallbackEmail || 'User'
-      
-      // Extract membership from user response
-      let subscription: Subscription | null = null
-      if (userData.membership) {
-        const membershipData = userData.membership
-        
-        // Parse next_billing_date
-        let nextBillingDate: Date
-        if (membershipData.next_billing_date) {
-          const billingDateStr = membershipData.next_billing_date
-          if (/^\d{4}-\d{2}-\d{2}$/.test(billingDateStr)) {
-            nextBillingDate = new Date(billingDateStr + 'T23:59:59.999Z')
-          } else {
-            nextBillingDate = new Date(billingDateStr)
-          }
-        } else {
-          nextBillingDate = membershipData.current_period_end 
-            ? new Date(membershipData.current_period_end)
-            : new Date()
-        }
-        
-        // Map membership to Subscription type
-        const tierValue = membershipData.tier
-        const tier = (tierValue && typeof tierValue === 'string' && tierValue.trim()) ? tierValue : 'standard'
-        
-        subscription = {
-          id: membershipData.id || 0,
-          userId: membershipData.user_id || auth0Id,
-          tier: tier,
-          monthlyLimit: membershipData.monthly_limit != null ? Number(membershipData.monthly_limit) : 0,
-          visitsUsed: membershipData.visits_used != null ? Number(membershipData.visits_used) : 0,
-          price: membershipData.price != null ? parseFloat(membershipData.price) : 0,
-          startDate: membershipData.start_date 
-            ? new Date(membershipData.start_date)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          nextBillingDate: nextBillingDate,
-          currentPeriodStart: membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date(),
-          currentPeriodEnd: membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date(),
-          status: membershipData.status || 'active',
-          stripeSubscriptionId: membershipData.stripe_subscription_id || undefined,
-          stripeCustomerId: membershipData.stripe_customer_id || undefined,
-          guestPassesLimit: membershipData.guest_passes_limit != null ? Number(membershipData.guest_passes_limit) : 0,
-          guestPassesUsed: membershipData.guest_passes_used != null ? Number(membershipData.guest_passes_used) : 0,
-          createdAt: membershipData.created_at 
-            ? new Date(membershipData.created_at)
-            : (membershipData.current_period_start ? new Date(membershipData.current_period_start) : new Date()),
-          updatedAt: membershipData.updated_at 
-            ? new Date(membershipData.updated_at)
-            : (membershipData.current_period_end ? new Date(membershipData.current_period_end) : new Date()),
-        } as Subscription
-      }
-      
-      return { name: userName, subscription }
-    }
-  } catch (error) {
-    console.error('[getUserData] Error fetching user data:', error)
-  }
-  
-  // Fallback to Auth0 session data if API fails
-  return {
-    name: fallbackName || fallbackEmail || 'User',
-    subscription: null,
-  }
-}
 
 async function getArticles(auth0Id: string): Promise<Article[]> {
   try {
@@ -156,8 +73,15 @@ export default async function ExplorePage() {
     }
     
     // Fetch data in parallel with error handling
+    const freeTierHint =
+      cookies().get(FREE_TIER_COOKIE)?.value === 'free'
     const [userData, articles] = await Promise.allSettled([
-      getUserData(auth0Id, session.user.email, session.user.name),
+      fetchUserDataWithSubscription(
+        auth0Id,
+        session.user.email,
+        session.user.name,
+        { freeTierHint }
+      ),
       getArticles(auth0Id),
     ])
 
