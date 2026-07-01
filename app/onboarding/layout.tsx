@@ -15,15 +15,11 @@ export default async function OnboardingLayout({
     redirect('/api/auth/login')
   }
 
-  const { needsOnboarding, user } = await getOrCreateAppUser(
+  const { needsOnboarding } = await getOrCreateAppUser(
     session.user.sub,
     session.user.email,
     session.user.name
   )
-
-  if (!user) {
-    throw new Error('Failed to load user account')
-  }
 
   if (!needsOnboarding) {
     redirect('/dashboard')

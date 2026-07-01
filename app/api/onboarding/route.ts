@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@auth0/nextjs-auth0'
-import { getOrCreateAppUser } from '@/lib/user'
+import { getOrCreateAppUser, updateUserViaApi } from '@/lib/user'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -34,19 +34,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get or create user
-    const { user } = await getOrCreateAppUser(
-      auth0Id,
-      session.user.email,
-      session.user.name
-    )
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Failed to get or create user' },
-        { status: 500 }
-      )
-    }
+    // Ensure user exists locally (upsert via API if needed)
+    await getOrCreateAppUser(auth0Id, session.user.email, session.user.name)
 
     // Update user with onboarding data via API
     const updatePayload: Record<string, unknown> = {
@@ -66,18 +55,10 @@ export async function POST(request: NextRequest) {
       updatePayload.assign_free_tier = true
     }
 
-    const response = await fetch('https://api.any-gym.com/user', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'auth0_id': auth0Id,
-      },
-      body: JSON.stringify(updatePayload),
-    })
+    const updateResult = await updateUserViaApi(auth0Id, updatePayload)
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Failed to update user' }))
-      throw new Error(errorData.error || `Failed to update user: ${response.statusText}`)
+    if (!updateResult.ok) {
+      throw new Error(updateResult.error || 'Failed to update user')
     }
 
     return NextResponse.json({

@@ -18,25 +18,6 @@ export interface AppUser {
   updated_at: Date
 }
 
-// Interface for SQL query result rows (all fields optional since different queries return different columns)
-interface UserRow {
-  id?: number
-  auth0_id?: string
-  email?: string | null
-  full_name?: string | null
-  date_of_birth?: string | null
-  address?: string | null
-  address_line1?: string | null
-  address_line2?: string | null
-  address_city?: string | null
-  address_postcode?: string | null
-  emergency_contact_name?: string | null
-  emergency_contact_number?: string | null
-  onboarding_completed?: boolean | null
-  created_at?: Date | string
-  updated_at?: Date | string
-}
-
 function mapApiUserToAppUser(
   userData: Record<string, unknown>,
   normalizedAuth0Id: string,
@@ -70,6 +51,115 @@ function mapApiUserToAppUser(
   }
 }
 
+function buildStubUser(
+  normalizedAuth0Id: string,
+  userEmail?: string,
+  userName?: string
+): AppUser {
+  return {
+    auth0_id: normalizedAuth0Id,
+    email: userEmail,
+    name: userName,
+    onboarding_completed: false,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }
+}
+
+async function fetchUserFromApi(
+  normalizedAuth0Id: string,
+  userEmail?: string,
+  userName?: string
+): Promise<AppUser | null> {
+  const response = await fetch('https://api.any-gym.com/user', {
+    headers: {
+      auth0_id: normalizedAuth0Id,
+    },
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    return null
+  }
+
+  const userData = await response.json()
+  return mapApiUserToAppUser(
+    userData,
+    normalizedAuth0Id,
+    userEmail,
+    userName
+  )
+}
+
+/**
+ * Create or upsert a user record. The external API does not expose POST /user;
+ * use PUT /user/update (upsert) then PUT /user as fallback.
+ */
+async function upsertUserViaApi(
+  normalizedAuth0Id: string,
+  userEmail?: string,
+  userName?: string
+): Promise<AppUser | null> {
+  const createPayload = {
+    auth0_id: normalizedAuth0Id,
+    email: userEmail || null,
+    full_name: userName || null,
+    name: userName || null,
+    onboarding_completed: false,
+  }
+
+  const upsertUrls = [
+    'https://api.any-gym.com/user/update',
+    'https://api.any-gym.com/user',
+  ]
+
+  for (const url of upsertUrls) {
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          auth0_id: normalizedAuth0Id,
+        },
+        body: JSON.stringify(createPayload),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}))
+        console.warn(
+          `[upsertUserViaApi] ${url} returned ${response.status}:`,
+          errorBody.error || response.statusText
+        )
+        continue
+      }
+
+      const responseBody = await response.json().catch(() => null)
+      if (responseBody?.auth0_id) {
+        return mapApiUserToAppUser(
+          responseBody,
+          normalizedAuth0Id,
+          userEmail,
+          userName
+        )
+      }
+
+      const fetched = await fetchUserFromApi(
+        normalizedAuth0Id,
+        userEmail,
+        userName
+      )
+      if (fetched) {
+        return fetched
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[upsertUserViaApi] ${url} failed:`, message)
+    }
+  }
+
+  return null
+}
+
 /**
  * Resolve where to send a user immediately after Auth0 login/signup.
  */
@@ -97,109 +187,105 @@ export async function getOrCreateAppUser(
 ): Promise<{ user: AppUser | null; needsOnboarding: boolean }> {
   const normalizedAuth0Id = auth0Id?.trim()
 
-  // Try to find existing user from API
   try {
-    const response = await fetch('https://api.any-gym.com/user', {
-      headers: {
-        'auth0_id': normalizedAuth0Id,
-      },
-      cache: 'no-store',
-    })
-
-    if (response.ok) {
-      const userData = await response.json()
-      const user = mapApiUserToAppUser(
-        userData,
-        normalizedAuth0Id,
-        userEmail,
-        userName
-      )
-      
-      return {
-        user,
-        needsOnboarding: !user.onboarding_completed,
-      }
-    } else if (response.status === 404) {
-      // User doesn't exist in API, will create below
-      console.log('[getOrCreateAppUser] User not found in API, will create')
-    } else {
-      console.error('[getOrCreateAppUser] API error:', response.status, response.statusText)
-      // On error, continue to creation logic below
-    }
-  } catch (error: any) {
-    console.error('[getOrCreateAppUser] Error fetching user from API:', error?.message)
-    // On error, continue to creation logic below
-  }
-
-  // User doesn't exist, create them via API
-  console.log('[getOrCreateAppUser] User not found, creating new user for auth0_id:', normalizedAuth0Id)
-  try {
-    const response = await fetch('https://api.any-gym.com/user', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'auth0_id': normalizedAuth0Id,
-      },
-      body: JSON.stringify({
-        auth0_id: normalizedAuth0Id,
-        email: userEmail || null,
-        full_name: userName || null,
-        name: userName || null,
-        onboarding_completed: false,
-      }),
-    })
-
-    if (!response.ok) {
-      // If user already exists (409 or similar), try fetching again
-      if (response.status === 409 || response.status === 400) {
-        console.log('[getOrCreateAppUser] User may already exist, fetching from API...')
-        const fetchResponse = await fetch('https://api.any-gym.com/user', {
-          headers: {
-            'auth0_id': normalizedAuth0Id,
-          },
-          cache: 'no-store',
-        })
-        
-        if (fetchResponse.ok) {
-          const userData = await fetchResponse.json()
-          const user = mapApiUserToAppUser(
-            userData,
-            normalizedAuth0Id,
-            userEmail,
-            userName
-          )
-          return {
-            user,
-            needsOnboarding: !user.onboarding_completed,
-          }
-        }
-      }
-      
-      const errorData = await response.json().catch(() => ({ error: 'Failed to create user' }))
-      throw new Error(errorData.error || `Failed to create user: ${response.statusText}`)
-    }
-
-    const userData = await response.json()
-    const user = mapApiUserToAppUser(
-      userData,
+    const existing = await fetchUserFromApi(
       normalizedAuth0Id,
       userEmail,
       userName
     )
-    
-    console.log('[getOrCreateAppUser] Successfully created user via API:', user.auth0_id, 'needsOnboarding: true')
-    return {
-      user,
-      needsOnboarding: true,
+    if (existing) {
+      return {
+        user: existing,
+        needsOnboarding: !existing.onboarding_completed,
+      }
     }
-  } catch (error: any) {
-    console.error('[getOrCreateAppUser] Error creating user via API:', error?.message, error?.stack)
-    // Re-throw the error so the caller knows something went wrong
-    throw error
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[getOrCreateAppUser] Error fetching user from API:', message)
   }
 
-  // If we get here, user creation failed
-  console.error('[getOrCreateAppUser] Failed to create user - no result returned')
-  return { user: null, needsOnboarding: true }
+  console.log(
+    '[getOrCreateAppUser] User not found, upserting via API for auth0_id:',
+    normalizedAuth0Id
+  )
+
+  try {
+    const created = await upsertUserViaApi(
+      normalizedAuth0Id,
+      userEmail,
+      userName
+    )
+
+    if (created) {
+      console.log(
+        '[getOrCreateAppUser] User upserted via API:',
+        created.auth0_id,
+        'needsOnboarding:',
+        !created.onboarding_completed
+      )
+      return {
+        user: created,
+        needsOnboarding: !created.onboarding_completed,
+      }
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[getOrCreateAppUser] Error upserting user via API:', message)
+  }
+
+  // Allow onboarding to proceed; PUT /user during onboarding may create the record
+  console.warn(
+    '[getOrCreateAppUser] Could not upsert user via API — using local stub for auth0_id:',
+    normalizedAuth0Id
+  )
+  const stubUser = buildStubUser(normalizedAuth0Id, userEmail, userName)
+  return {
+    user: stubUser,
+    needsOnboarding: true,
+  }
 }
 
+/**
+ * PUT user data to the external API, trying /user/update then /user.
+ */
+export async function updateUserViaApi(
+  auth0Id: string,
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; error?: string; data?: unknown }> {
+  const normalizedAuth0Id = auth0Id.trim()
+  const urls = [
+    'https://api.any-gym.com/user/update',
+    'https://api.any-gym.com/user',
+  ]
+
+  let lastError = 'Failed to update user'
+
+  for (const url of urls) {
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        auth0_id: normalizedAuth0Id,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}))
+      return { ok: true, data }
+    }
+
+    const errorData = await response.json().catch(() => ({}))
+    lastError =
+      (errorData as { error?: string }).error ||
+      `Failed to update user: ${response.statusText}`
+
+    if (response.status === 404) {
+      continue
+    }
+
+    return { ok: false, error: lastError }
+  }
+
+  return { ok: false, error: lastError }
+}
