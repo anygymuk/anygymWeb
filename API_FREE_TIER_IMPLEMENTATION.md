@@ -12,7 +12,8 @@ For database migrations and Stripe Dashboard setup, see [FREE_TIER_SETUP.md](./F
 2. [Authentication](#2-authentication)
 3. [Database prerequisites](#3-database-prerequisites)
 4. [Endpoint changes summary](#4-endpoint-changes-summary)
-5. [PUT /user — assign free tier](#5-put-user--assign-free-tier)
+5. [POST /user — create user (required for onboarding)](#5-post-user--create-user-required-for-onboarding)
+6. [PUT /user — assign free tier](#6-put-user--assign-free-tier)
 6. [GET /user — membership response](#6-get-user--membership-response)
 7. [GET /gyms and GET /gyms/{id}](#7-get-gyms-and-get-gymsid)
 8. [POST /generate_pass — block free tier](#8-post-generate_pass--block-free-tier)
@@ -111,7 +112,9 @@ Ensure `gym_passes.pass_cost` exists (the web app already maps `pass_cost` from 
 
 | Endpoint | Method | Change |
 |----------|--------|--------|
-| `/user` | PUT | Handle `assign_free_tier: true` |
+| `/user` | **POST** | **Required** — create user on first Auth0 login |
+| `/user` | PUT | Handle profile updates + `assign_free_tier: true` |
+| `/user/update` | PUT | Partial profile updates (user must already exist) |
 | `/user` | GET | Return `membership.tier: "free"` when applicable |
 | `/gyms` | GET | Include `price_per_pass` on each gym |
 | `/gyms/{id}` | GET | Include `price_per_pass` |
@@ -122,7 +125,115 @@ Ensure `gym_passes.pass_cost` exists (the web app already maps `pass_cost` from 
 
 ---
 
-## 5. PUT /user — assign free tier
+## 5. POST /user — create user (required for onboarding)
+
+**This is blocking onboarding today.** The NestJS `UsersController.updateUser` throws `User not found` because new Auth0 users do not exist in the database yet, and:
+
+- `POST /user` → **404** (route not registered)
+- `PUT /user` → **400** `User not found`
+- `PUT /user/update` → **400** `User not found`
+
+The web app calls **`POST /user`** immediately after Auth0 signup, then uses **`PUT /user/update`** to save onboarding profile data.
+
+### Request
+
+**Headers:**
+```
+Content-Type: application/json
+auth0_id: auth0|abc123
+```
+
+**Body:**
+```json
+{
+  "auth0_id": "auth0|abc123",
+  "email": "user@example.com",
+  "full_name": "Jane Doe",
+  "name": "Jane Doe",
+  "onboarding_completed": false
+}
+```
+
+### NestJS implementation (UsersController)
+
+```typescript
+@Post()
+async createUser(
+  @Headers('auth0_id') auth0Id: string,
+  @Body() body: CreateUserDto,
+) {
+  if (!auth0Id) {
+    throw new UnauthorizedException('auth0_id header required');
+  }
+
+  const existing = await this.usersService.findByAuth0Id(auth0Id);
+  if (existing) {
+    return existing; // idempotent — return existing user
+  }
+
+  return this.usersService.create({
+    auth0_id: auth0Id,
+    email: body.email ?? null,
+    full_name: body.full_name ?? body.name ?? null,
+    onboarding_completed: false,
+  });
+}
+```
+
+### Response
+
+**Success `200` or `201`:**
+```json
+{
+  "auth0_id": "auth0|abc123",
+  "email": "user@example.com",
+  "full_name": "Jane Doe",
+  "onboarding_completed": false,
+  "created_at": "2026-07-01T20:00:00Z"
+}
+```
+
+### Alternative: upsert in updateUser
+
+If you prefer not to add `POST /user`, change `updateUser` / `updateUserPartial` to **create when missing**:
+
+```typescript
+async updateUser(auth0Id: string, dto: UpdateUserDto) {
+  let user = await this.usersService.findByAuth0Id(auth0Id);
+  if (!user) {
+    user = await this.usersService.create({
+      auth0_id: auth0Id,
+      email: dto.email,
+      full_name: dto.full_name,
+      onboarding_completed: false,
+    });
+  }
+  return this.usersService.update(user.id, dto);
+}
+```
+
+### Test
+
+```bash
+curl -X POST https://api.any-gym.com/user \
+  -H "Content-Type: application/json" \
+  -H "auth0_id: auth0|test-new-user" \
+  -d '{
+    "auth0_id": "auth0|test-new-user",
+    "email": "test@example.com",
+    "full_name": "Test User",
+    "onboarding_completed": false
+  }'
+
+# Should return 200/201, NOT 404
+
+curl https://api.any-gym.com/user -H "auth0_id: auth0|test-new-user"
+# Should return the created user
+```
+
+---
+
+## 6. PUT /user — assign free tier
 
 ### Called by
 

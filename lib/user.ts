@@ -66,12 +66,24 @@ function buildStubUser(
   }
 }
 
+const API_BASE = process.env.ANYGYM_API_BASE_URL || 'https://api.any-gym.com'
+
+async function parseApiError(response: Response): Promise<string> {
+  const errorData = await response.json().catch(() => ({}))
+  const record = errorData as { error?: string; message?: string }
+  return (
+    record.message ||
+    record.error ||
+    `Request failed: ${response.statusText}`
+  )
+}
+
 async function fetchUserFromApi(
   normalizedAuth0Id: string,
   userEmail?: string,
   userName?: string
 ): Promise<AppUser | null> {
-  const response = await fetch('https://api.any-gym.com/user', {
+  const response = await fetch(`${API_BASE}/user`, {
     headers: {
       auth0_id: normalizedAuth0Id,
     },
@@ -92,55 +104,42 @@ async function fetchUserFromApi(
 }
 
 /**
- * Create or upsert a user record. The external API does not expose POST /user;
- * use PUT /user/update (upsert) then PUT /user as fallback.
+ * Create a user record via POST /user. The API must expose this route;
+ * PUT /user/update and PUT /user only update existing users.
  */
-export async function upsertUserViaApi(
+export async function createUserViaApi(
   normalizedAuth0Id: string,
   userEmail?: string,
   userName?: string
-): Promise<AppUser | null> {
-  const createPayload = {
-    auth0_id: normalizedAuth0Id,
-    email: userEmail || null,
-    full_name: userName || null,
-    name: userName || null,
-    onboarding_completed: false,
-  }
+): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE}/user`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        auth0_id: normalizedAuth0Id,
+      },
+      body: JSON.stringify({
+        auth0_id: normalizedAuth0Id,
+        email: userEmail || null,
+        full_name: userName || null,
+        name: userName || null,
+        onboarding_completed: false,
+      }),
+    })
 
-  const upsertUrls = [
-    'https://api.any-gym.com/user/update',
-    'https://api.any-gym.com/user',
-  ]
-
-  for (const url of upsertUrls) {
-    try {
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          auth0_id: normalizedAuth0Id,
-        },
-        body: JSON.stringify(createPayload),
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}))
-        console.warn(
-          `[upsertUserViaApi] ${url} returned ${response.status}:`,
-          errorBody.error || response.statusText
-        )
-        continue
-      }
-
-      const responseBody = await response.json().catch(() => null)
-      if (responseBody?.auth0_id) {
-        return mapApiUserToAppUser(
-          responseBody,
-          normalizedAuth0Id,
-          userEmail,
-          userName
-        )
+    if (response.ok) {
+      const userData = await response.json().catch(() => null)
+      if (userData?.auth0_id) {
+        return {
+          ok: true,
+          user: mapApiUserToAppUser(
+            userData,
+            normalizedAuth0Id,
+            userEmail,
+            userName
+          ),
+        }
       }
 
       const fetched = await fetchUserFromApi(
@@ -149,15 +148,65 @@ export async function upsertUserViaApi(
         userName
       )
       if (fetched) {
-        return fetched
+        return { ok: true, user: fetched }
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[upsertUserViaApi] ${url} failed:`, message)
+
+      return { ok: true, user: buildStubUser(normalizedAuth0Id, userEmail, userName) }
     }
+
+    const errorMessage = await parseApiError(response)
+
+    if (response.status === 404) {
+      return {
+        ok: false,
+        error:
+          'User creation is not available on the API (POST /user missing). The API must implement user creation before onboarding can complete.',
+      }
+    }
+
+    if (response.status === 409 || response.status === 400) {
+      const existing = await fetchUserFromApi(
+        normalizedAuth0Id,
+        userEmail,
+        userName
+      )
+      if (existing) {
+        return { ok: true, user: existing }
+      }
+    }
+
+    return { ok: false, error: errorMessage }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, error: message }
+  }
+}
+
+/**
+ * Ensure the user exists in the API (GET, then POST /user if missing).
+ */
+export async function ensureUserExistsViaApi(
+  auth0Id: string,
+  userEmail?: string,
+  userName?: string
+): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
+  const normalizedAuth0Id = auth0Id.trim()
+
+  const existing = await fetchUserFromApi(
+    normalizedAuth0Id,
+    userEmail,
+    userName
+  )
+  if (existing) {
+    return { ok: true, user: existing }
   }
 
-  return null
+  console.log(
+    '[ensureUserExistsViaApi] Creating user via POST /user:',
+    normalizedAuth0Id
+  )
+
+  return createUserViaApi(normalizedAuth0Id, userEmail, userName)
 }
 
 /**
@@ -205,38 +254,32 @@ export async function getOrCreateAppUser(
   }
 
   console.log(
-    '[getOrCreateAppUser] User not found, upserting via API for auth0_id:',
+    '[getOrCreateAppUser] User not found, creating via API for auth0_id:',
     normalizedAuth0Id
   )
 
-  try {
-    const created = await upsertUserViaApi(
-      normalizedAuth0Id,
-      userEmail,
-      userName
-    )
+  const createResult = await ensureUserExistsViaApi(
+    normalizedAuth0Id,
+    userEmail,
+    userName
+  )
 
-    if (created) {
-      console.log(
-        '[getOrCreateAppUser] User upserted via API:',
-        created.auth0_id,
-        'needsOnboarding:',
-        !created.onboarding_completed
-      )
-      return {
-        user: created,
-        needsOnboarding: !created.onboarding_completed,
-      }
+  if (createResult.ok && createResult.user) {
+    console.log(
+      '[getOrCreateAppUser] User ready:',
+      createResult.user.auth0_id,
+      'needsOnboarding:',
+      !createResult.user.onboarding_completed
+    )
+    return {
+      user: createResult.user,
+      needsOnboarding: !createResult.user.onboarding_completed,
     }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('[getOrCreateAppUser] Error upserting user via API:', message)
   }
 
-  // Allow onboarding to proceed; PUT /user during onboarding may create the record
   console.warn(
-    '[getOrCreateAppUser] Could not upsert user via API — using local stub for auth0_id:',
-    normalizedAuth0Id
+    '[getOrCreateAppUser] Could not create user via API:',
+    createResult.error
   )
   const stubUser = buildStubUser(normalizedAuth0Id, userEmail, userName)
   return {
@@ -253,10 +296,7 @@ export async function updateUserViaApi(
   payload: Record<string, unknown>
 ): Promise<{ ok: boolean; error?: string; status?: number; data?: unknown }> {
   const normalizedAuth0Id = auth0Id.trim()
-  const urls = [
-    'https://api.any-gym.com/user/update',
-    'https://api.any-gym.com/user',
-  ]
+  const urls = [`${API_BASE}/user/update`, `${API_BASE}/user`]
 
   let lastError = 'Failed to update user'
   let lastStatus = 500
@@ -282,8 +322,8 @@ export async function updateUserViaApi(
 
       const errorData = await response.json().catch(() => ({}))
       lastError =
-        (errorData as { error?: string; message?: string }).error ||
         (errorData as { error?: string; message?: string }).message ||
+        (errorData as { error?: string; message?: string }).error ||
         `Failed to update user: ${response.statusText}`
       lastStatus = response.status
 
@@ -327,7 +367,20 @@ export async function saveOnboardingViaApi(
     assignFreeTier?: boolean
   }
 ): Promise<{ ok: boolean; error?: string }> {
-  await upsertUserViaApi(auth0Id, profile.email, profile.name)
+  const ensureResult = await ensureUserExistsViaApi(
+    auth0Id,
+    profile.email,
+    profile.name
+  )
+
+  if (!ensureResult.ok) {
+    return {
+      ok: false,
+      error:
+        ensureResult.error ||
+        'Could not create your account. Please try again or contact support.',
+    }
+  }
 
   const profilePayload: Record<string, unknown> = {
     email: profile.email || null,
