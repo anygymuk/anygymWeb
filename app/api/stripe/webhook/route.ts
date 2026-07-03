@@ -3,6 +3,7 @@ import { stripe } from '@/lib/stripe'
 import Stripe from 'stripe'
 import sgMail from '@sendgrid/mail'
 import { haversineDistance, getCoordinatesFromPostcode } from '@/lib/geocoding'
+import { fulfillPassPurchaseFromStripeSession } from '@/lib/pass-checkout-server'
 
 // Disable body parsing for webhook - Stripe needs raw body for signature verification
 export const runtime = 'nodejs'
@@ -116,58 +117,21 @@ async function handleOtherEvents(event: Stripe.Event) {
   }
 }
 
-const API_BASE = process.env.ANYGYM_API_BASE_URL || 'https://api.any-gym.com'
-
 async function fulfillPassPurchaseOnApi(
   session: Stripe.Checkout.Session
 ): Promise<void> {
-  const auth0Id =
-    session.metadata?.auth0_id ||
-    session.metadata?.userId ||
-    undefined
-  const gymId = session.metadata?.gym_id
+  const result = await fulfillPassPurchaseFromStripeSession(session)
 
-  if (!auth0Id || !gymId) {
-    console.error('[webhook] Missing auth0_id or gym_id for pass purchase fulfillment')
+  if (!result.ok) {
+    console.error('[webhook] Pass purchase fulfillment failed:', result.error)
     return
   }
 
-  const payload = {
-    auth0_id: auth0Id,
-    gym_id: Number(gymId),
-    stripe_checkout_session_id: session.id,
-    stripe_payment_intent_id: session.payment_intent,
-    amount: session.amount_total ? session.amount_total / 100 : undefined,
-    currency: session.currency || 'gbp',
-    purchase_type: 'single_pass',
-  }
-
-  console.log('[webhook] Fulfilling pass purchase on API:', payload)
-
-  try {
-    const response = await fetch(`${API_BASE}/complete_pass_purchase`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        auth0_id: auth0Id,
-      },
-      body: JSON.stringify(payload),
-    })
-
-    if (response.ok) {
-      console.log('[webhook] Pass purchase fulfilled successfully')
-      return
-    }
-
-    const errorText = await response.text()
-    console.error(
-      '[webhook] Pass purchase fulfillment failed:',
-      response.status,
-      errorText
-    )
-  } catch (error) {
-    console.error('[webhook] Error fulfilling pass purchase:', error)
-  }
+  console.log(
+    '[webhook] Pass purchase fulfilled via',
+    result.endpoint,
+    result.alreadyFulfilled ? '(already fulfilled)' : ''
+  )
 }
 
 async function processCheckoutSession(

@@ -13,6 +13,7 @@ import {
   FREE_TIER_COOKIE,
   mapMembershipFromApi,
 } from '@/lib/membership'
+import { recoverUnfulfilledPassPurchases } from '@/lib/pass-checkout-server'
 
 // Mark page as dynamic - uses cookies for authentication
 export const dynamic = 'force-dynamic'
@@ -391,7 +392,7 @@ export default async function PassesPage() {
     console.log('[PassesPage] Subscription visitsUsed:', subscription?.visitsUsed)
     
     // Get passes - filter from the fetched passes
-    const activePasses = await getActivePasses(auth0Id)
+    let activePasses = await getActivePasses(auth0Id)
     console.log('[PassesPage] Active passes:', activePasses.length, activePasses)
     
     const allPasses = await getAllUserPasses(auth0Id)
@@ -411,6 +412,14 @@ export default async function PassesPage() {
       auth0Id,
       freeTierHint
     )
+
+    const membershipMode =
+      finalSubscription?.tier?.toLowerCase() === 'free' ? 'free' : 'other'
+    if (membershipMode === 'free' && activePasses.length === 0) {
+      await recoverUnfulfilledPassPurchases(auth0Id, userEmail)
+      activePasses = await getActivePasses(auth0Id)
+    }
+
     const initials = userData.name
       .split(' ')
       .map((n: string) => n[0])

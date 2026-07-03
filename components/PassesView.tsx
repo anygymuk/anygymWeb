@@ -62,12 +62,6 @@ export default function PassesView({
   const isFreeTier = membershipMode === 'free'
   const isPaidTier = membershipMode === 'paid'
 
-  useEffect(() => {
-    if (searchParams.get('purchase') === 'success') {
-      setPurchaseSuccess(true)
-      router.replace('/passes', { scroll: false })
-    }
-  }, [searchParams, router])
   // Debug logging with error handling
   useEffect(() => {
     try {
@@ -404,6 +398,60 @@ export default function PassesView({
       setIsRefreshing(false)
     }
   }
+
+  useEffect(() => {
+    const purchase = searchParams.get('purchase')
+    const sessionId = searchParams.get('session_id')
+
+    if (purchase !== 'success') {
+      return
+    }
+
+    let cancelled = false
+
+    const fulfillPurchase = async () => {
+      try {
+        setIsRefreshing(true)
+        const response = await fetch('/api/passes/fulfill-purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            sessionId ? { sessionId } : { recoverRecent: true }
+          ),
+        })
+        const data = await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.error || 'Failed to create your pass after payment'
+          )
+        }
+
+        if (!cancelled) {
+          setPurchaseSuccess(true)
+          await refreshPassesData()
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Payment succeeded but your pass could not be created yet. Please refresh shortly.'
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          router.replace('/passes', { scroll: false })
+        }
+      }
+    }
+
+    fulfillPurchase()
+
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams, router])
 
   const purchasePass = async (gymId: number) => {
     setShowTermsModal(null)
